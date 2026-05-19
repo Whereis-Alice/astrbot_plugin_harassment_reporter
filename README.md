@@ -113,6 +113,9 @@ report_harassment
 
 - `warn_once_then_report`
   第一次调用时先警告；如果后面又触发一次工具，才真正上报。
+  默认上报后保持静默；如果打开 `warn_once_inform_after_report`，则上报后也会自然告诉对方。
+  如果 `natural_language_warn_reply = true`，第一次警告会按当前人设自然表达。
+  如果同时打开 `warn_once_inform_after_report` 且 `natural_language_report_reply = true`，第二次真正上报后也会按当前人设自然告诉对方。
 
 - `report_then_silent`
   先上报，再保持静默，不告诉对方。
@@ -137,11 +140,18 @@ report_harassment
 - `warn_message_template`
   警告的核心意思模板。即使开启自然语言，LLM 也会围绕这个意思自由发挥。
 
+- `warn_once_inform_after_report`
+  只在 `warn_once_then_report` 模式下生效。
+  开启后，第二次触发并真正上报之后，LLM 还会按当前人设自然告诉对方“我已经报告了”。
+  关闭时则是上报后继续静默。
+
 - `natural_language_report_reply`
-  在 `report_then_inform` 模式下，是否要求 LLM 基于当前人设自然表达“我已经报告了”。
+  在需要告诉对方“我已经报告了”的场景下，是否要求 LLM 基于当前人设自然表达。
+  既影响 `report_then_inform`，也影响开启了 `warn_once_inform_after_report` 的 `warn_once_then_report`。
 
 - `report_inform_template`
   告知已上报时的核心意思模板。
+  既用于 `report_then_inform`，也用于开启了 `warn_once_inform_after_report` 的 `warn_once_then_report`。
 
 - `owner_report_style`
   给接收报警的那个会话发什么风格的消息。

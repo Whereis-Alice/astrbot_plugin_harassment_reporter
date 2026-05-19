@@ -213,6 +213,9 @@ class HarassmentReporterPlugin(star.Star):
     def _natural_inform_enabled(self) -> bool:
         return bool(self._cfg("natural_language_report_reply", True))
 
+    def _warn_once_inform_after_report(self) -> bool:
+        return bool(self._cfg("warn_once_inform_after_report", False))
+
     def _owner_report_style(self) -> str:
         style = _clean_text(
             self._cfg("owner_report_style", "structured"),
@@ -389,7 +392,9 @@ class HarassmentReporterPlugin(star.Star):
             )
 
         mode = self._tool_response_mode()
-        if mode == "report_then_inform":
+        if mode == "report_then_inform" or (
+            mode == "warn_once_then_report" and self._warn_once_inform_after_report()
+        ):
             return self._tool_report_inform_instruction(
                 event=event,
                 reason=reason,
@@ -853,7 +858,9 @@ class HarassmentReporterPlugin(star.Star):
             expected_help=expected_help,
         )
         if status == "cooldown":
-            if mode == "report_then_inform":
+            if mode == "report_then_inform" or (
+                mode == "warn_once_then_report" and self._warn_once_inform_after_report()
+            ):
                 return self._tool_report_inform_instruction(
                     event=event,
                     reason=reason,
@@ -912,7 +919,10 @@ class HarassmentReporterPlugin(star.Star):
         mode_hint = {
             "silent": "上报成功后，默认不要让对方知道你已经上报。",
             "warn_only": f"调用后优先只发出警告，可以自然提到你会告诉{receiver_name}。",
-            "warn_once_then_report": f"第一次调用时先警告；如果对方继续骚扰，再次调用时再正式上报给{receiver_name}。",
+            "warn_once_then_report": (
+                f"第一次调用时先警告；如果对方继续骚扰，再次调用时再正式上报给{receiver_name}。"
+                f"{'上报后会自然告诉对方。' if self._warn_once_inform_after_report() else '上报后默认保持静默。'}"
+            ),
             "report_then_silent": "调用后先完成上报，但不要向对方透露你已经上报。",
             "report_then_inform": f"调用后先完成上报，再自然告诉对方你已经报告给{receiver_name}。",
         }.get(mode, "")
@@ -979,6 +989,7 @@ class HarassmentReporterPlugin(star.Star):
             f"- 接收人称呼：{self._report_receiver_name()}\n"
             f"- 冷却秒数：{self._cooldown_seconds()}\n"
             f"- 工具回应策略：{self._tool_response_mode()}\n"
+            f"- 先警告再上报后告知对方：{self._warn_once_inform_after_report()}\n"
             f"- 警告使用自然语言：{self._natural_warn_enabled()}\n"
             f"- 告知已上报使用自然语言：{self._natural_inform_enabled()}\n"
             f"- 给主人的上报风格：{self._owner_report_style()}\n"

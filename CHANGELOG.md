@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.1 - 2026-05-19
+
+### Added
+
+- Added clearer `warn_once_inform_after_report` behavior so `warn_once_then_report` can optionally inform the harasser after the second real report.
+
+### Changed
+
+- Clarified that the first step of `warn_once_then_report` uses persona-aware natural-language warning when `natural_language_warn_reply` is enabled.
+- Clarified that `natural_language_report_reply` and `report_inform_template` also apply when `warn_once_then_report` is configured to inform after the second report.
+- Shortened and refined several config descriptions, hints, and option labels to improve readability in the AstrBot config UI.
+- Updated plugin metadata to version `1.2.1`.
+
 ## 1.2.0 - 2026-05-19
 
 ### Added
@@ -10,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - Added configurable `report_receiver_name` so the LLM knows who it is reporting to, such as `主人` or `狐狸`.
 - Added configurable persona-aware natural-language warning replies for harassers.
 - Added configurable persona-aware natural-language "already reported" replies.
+- Added configurable `warn_once_inform_after_report` to control whether `warn_once_then_report` should also naturally inform the harasser after the real report is sent.
 - Added configurable owner report style selection between structured alerts and persona-flavored natural-language reports.
 - Added optional extra LLM rewrite step for owner reports through `natural_language_report_to_owner`.
 - Added `warn_message_template`, `report_inform_template`, and `warn_once_memory_seconds` config items.
@@ -19,6 +33,7 @@ All notable changes to this project will be documented in this file.
 
 - Updated harassment tool behavior so it no longer directly sends mechanical confirmation messages like `上报已发送给主人。` into the harasser's session.
 - Changed tool-result handling to guide the LLM's in-character reply instead of plugin-side echoing.
+- Shortened several config descriptions and hints to improve visibility in the AstrBot config UI.
 - Improved status output and README/config documentation to explain all new switches and behavior modes.
 - Updated plugin metadata to version `1.2.0` and pointed repository metadata to `Whereis-Alice/astrbot_plugin_harassment_reporter`.
 

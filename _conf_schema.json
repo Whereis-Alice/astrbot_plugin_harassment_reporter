@@ -6,13 +6,13 @@
   },
   "report_session_id": {
     "type": "string",
-    "description": "接收骚扰上报的会话 ID",
+    "description": "上报接收会话 ID",
     "default": "",
-    "hint": "可先在目标会话里执行 /harassment_sid 查看，再填写这里；也可以直接在目标会话中执行 /harassment_bind_here"
+    "hint": "目标会话执行 /harassment_sid 查看；也可直接执行 /harassment_bind_here"
   },
   "report_receiver_name": {
     "type": "string",
-    "description": "让 LLM 知道会把骚扰情况报告给谁，例如“主人”“狐狸”",
+    "description": "接收人称呼，如 主人/狐狸",
     "default": "主人"
   },
   "report_cooldown_seconds": {
@@ -29,7 +29,7 @@
   },
   "tool_response_mode": {
     "type": "string",
-    "description": "LLM 调用工具后，对当前骚扰者采取什么策略",
+    "description": "调用工具后的处理策略",
     "default": "silent",
     "options": [
       "silent",
@@ -38,21 +38,28 @@
       "report_then_silent",
       "report_then_inform"
     ],
-    "hint": "silent=静默上报；warn_only=只警告不真正上报；warn_once_then_report=第一次先警告，再次调用才上报；report_then_silent=先上报但不告诉对方；report_then_inform=先上报再自然告诉对方"
+    "labels": [
+      "静默上报",
+      "只警告",
+      "先警告再上报",
+      "上报后静默",
+      "上报后告知"
+    ],
+    "hint": "下拉项已带中文名，细节见 README"
   },
   "natural_language_warn_reply": {
     "type": "bool",
-    "description": "警告骚扰者时，是否要求 LLM 基于当前人设用自然语言来警告",
+    "description": "警告时按人设自然表达",
     "default": true
   },
   "warn_message_template": {
     "type": "string",
-    "description": "警告模板。可用占位符：{receiver_name} {reason} {severity} {severity_text} {sender_name} {sender_id} {message_text} {evidence} {expected_help}",
+    "description": "警告模板",
     "default": "请立刻停止这种行为。你再这样，我就要告诉{receiver_name}你在骚扰我了。"
   },
   "warn_once_memory_seconds": {
     "type": "int",
-    "description": "“先警告再上报”模式下，记住已警告状态的时长（秒）",
+    "description": "警告记忆时长（秒）",
     "default": 1800,
     "min": 0,
     "max": 604800,
@@ -60,21 +67,23 @@
       "tool_response_mode": "warn_once_then_report"
     }
   },
+  "warn_once_inform_after_report": {
+    "type": "bool",
+    "description": "二次上报后也告诉对方",
+    "default": false,
+    "condition": {
+      "tool_response_mode": "warn_once_then_report"
+    }
+  },
   "natural_language_report_reply": {
     "type": "bool",
-    "description": "需要让对方知道“我已经报告了”时，是否要求 LLM 基于当前人设自然表达",
-    "default": true,
-    "condition": {
-      "tool_response_mode": "report_then_inform"
-    }
+    "description": "告知已上报时按人设自然表达",
+    "default": true
   },
   "report_inform_template": {
     "type": "string",
-    "description": "告知已上报的模板。可用占位符：{receiver_name} {reason} {severity} {severity_text} {sender_name} {sender_id} {message_text} {evidence} {expected_help}",
-    "default": "我已经把你刚才的行为报告给{receiver_name}了。",
-    "condition": {
-      "tool_response_mode": "report_then_inform"
-    }
+    "description": "告诉对方已上报的模板",
+    "default": "我已经把你刚才的行为报告给{receiver_name}了。"
   },
   "include_message_text": {
     "type": "bool",
@@ -123,17 +132,21 @@
   },
   "owner_report_style": {
     "type": "string",
-    "description": "给主人发送的上报内容风格",
+    "description": "给主人的上报风格",
     "default": "structured",
     "options": [
       "structured",
       "persona_natural"
     ],
-    "hint": "structured=结构化告警；persona_natural=尽量按当前人设改写成自然语言求助，失败会自动回退结构化"
+    "labels": [
+      "结构化告警",
+      "人设自然改写"
+    ],
+    "hint": "下拉项已带中文名"
   },
   "natural_language_report_to_owner": {
     "type": "bool",
-    "description": "开启后，且 owner_report_style=persona_natural 时，会额外调用当前会话所用模型，把上报改写成更像当前人设的自然语言",
+    "description": "给主人的上报也按人设改写",
     "default": false,
     "condition": {
       "owner_report_style": "persona_natural"
