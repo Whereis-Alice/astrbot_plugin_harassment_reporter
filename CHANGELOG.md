@@ -1,67 +1,67 @@
-# Changelog
+# 更新日志
 
-All notable changes to this project will be documented in this file.
+本项目的重要变更都会记录在这里。
 
 ## 1.2.2 - 2026-05-20
 
-### Added
+### 新增
 
-- Added configurable `watchlist_snapshot` so the current observation list is visible directly in the plugin config page as a synced text snapshot.
+- 新增可配置项 `watchlist_snapshot`，会把当前观察名单同步成一段文本，直接展示在插件配置页里。
 
-### Changed
+### 变更
 
-- Relaxed watchlist viewing so `/harassment_watchlist` can be used either by AstrBot admins or inside the bound harassment-report receiver session.
-- Synced watchlist snapshot content automatically on plugin initialization and whenever the watchlist changes.
-- Updated plugin metadata to version `1.2.2`.
+- 放宽观察名单查看权限，`/harassment_watchlist` 现在既可以由 AstrBot 管理员使用，也可以在已绑定的骚扰上报接收会话里使用。
+- 插件启动时以及观察名单发生变化时，会自动同步 `watchlist_snapshot` 内容。
+- 插件元数据版本更新为 `1.2.2`。
 
 ## 1.2.1 - 2026-05-19
 
-### Added
+### 新增
 
-- Added clearer `warn_once_inform_after_report` behavior so `warn_once_then_report` can optionally inform the harasser after the second real report.
+- 补充更清晰的 `warn_once_inform_after_report` 行为说明，让 `warn_once_then_report` 可以在第二次真正上报后选择是否继续告知骚扰者。
 
-### Changed
+### 变更
 
-- Clarified that the first step of `warn_once_then_report` uses persona-aware natural-language warning when `natural_language_warn_reply` is enabled.
-- Clarified that `natural_language_report_reply` and `report_inform_template` also apply when `warn_once_then_report` is configured to inform after the second report.
-- Shortened and refined several config descriptions, hints, and option labels to improve readability in the AstrBot config UI.
-- Updated plugin metadata to version `1.2.1`.
+- 明确 `warn_once_then_report` 的第一步在开启 `natural_language_warn_reply` 时，会优先使用基于当前人设的自然语言警告。
+- 明确当 `warn_once_then_report` 配置为“上报后告知”时，`natural_language_report_reply` 和 `report_inform_template` 同样会生效。
+- 精简并优化多个配置项的描述、提示和选项文案，提升 AstrBot 配置界面的可读性。
+- 插件元数据版本更新为 `1.2.1`。
 
 ## 1.2.0 - 2026-05-19
 
-### Added
+### 新增
 
-- Added configurable `tool_response_mode` so the LLM can choose between silent handling, warning only, warning once then reporting, reporting silently, or reporting then informing the harasser.
-- Added configurable `report_receiver_name` so the LLM knows who it is reporting to, such as `主人` or `狐狸`.
-- Added configurable persona-aware natural-language warning replies for harassers.
-- Added configurable persona-aware natural-language "already reported" replies.
-- Added configurable `warn_once_inform_after_report` to control whether `warn_once_then_report` should also naturally inform the harasser after the real report is sent.
-- Added configurable owner report style selection between structured alerts and persona-flavored natural-language reports.
-- Added optional extra LLM rewrite step for owner reports through `natural_language_report_to_owner`.
-- Added `warn_message_template`, `report_inform_template`, and `warn_once_memory_seconds` config items.
-- Added `.gitignore` rule for runtime-generated `data/`.
+- 新增可配置项 `tool_response_mode`，让 LLM 可以在静默处理、仅警告、先警告再上报、静默上报、上报后告知骚扰者等模式之间切换。
+- 新增可配置项 `report_receiver_name`，让 LLM 知道自己会把情况报告给谁，例如 `主人` 或 `狐狸`。
+- 新增基于当前人设的自然语言警告回复配置。
+- 新增基于当前人设的自然语言“已上报”回复配置。
+- 新增 `warn_once_inform_after_report`，用于控制 `warn_once_then_report` 在真正发送上报后是否还要自然地告知骚扰者。
+- 新增给主人上报时的风格选择，可在结构化提醒和人设化自然语言上报之间切换。
+- 新增 `natural_language_report_to_owner` 可选重写步骤，用于额外让 LLM 按当前人设润色给主人看的上报内容。
+- 新增 `warn_message_template`、`report_inform_template` 和 `warn_once_memory_seconds` 配置项。
+- 新增 `.gitignore` 规则，忽略运行时生成的 `data/`。
 
-### Changed
+### 变更
 
-- Updated harassment tool behavior so it no longer directly sends mechanical confirmation messages like `上报已发送给主人。` into the harasser's session.
-- Changed tool-result handling to guide the LLM's in-character reply instead of plugin-side echoing.
-- Shortened several config descriptions and hints to improve visibility in the AstrBot config UI.
-- Improved status output and README/config documentation to explain all new switches and behavior modes.
-- Updated plugin metadata to version `1.2.0` and pointed repository metadata to `Whereis-Alice/astrbot_plugin_harassment_reporter`.
+- 调整骚扰上报工具行为，不再由插件直接向骚扰者会话发送类似“上报已发送给主人。”这类机械提示。
+- 工具返回结果改为引导 LLM 自己按人设回复，而不是由插件侧直接代发固定文本。
+- 精简多个配置项说明和提示，提升 AstrBot 配置界面的显示效果。
+- 完善状态输出以及 README 和配置文档，对新增开关和行为模式做更清晰说明。
+- 插件元数据版本更新为 `1.2.0`，并将仓库信息指向 `Whereis-Alice/astrbot_plugin_harassment_reporter`。
 
-### Preserved
+### 保留
 
-- Kept support for recent-context summaries in reports.
-- Kept support for auto-adding reported users to the watchlist.
-- Kept support for cooldown, admin commands, and test reporting.
+- 保留上报时附带近期上下文摘要的能力。
+- 保留上报后自动把对方加入观察名单的能力。
+- 保留冷却时间、管理员命令和测试上报等原有能力。
 
 ## 1.1.0 - 2026-05-19
 
-### Added
+### 新增
 
-- Initial harassment reporter plugin release.
-- Added global `report_harassment` tool for LLM self-reporting.
-- Added configurable report target session.
-- Added optional recent-context summary attachment.
-- Added optional automatic watchlist entry creation.
-- Added admin commands for binding report sessions, checking status, sending test reports, and managing the watchlist.
+- 首个骚扰上报器插件版本。
+- 新增全局 `report_harassment` 工具，允许 LLM 在感觉被骚扰时主动上报。
+- 新增可配置的上报目标会话。
+- 新增可选的近期上下文摘要附带能力。
+- 新增可选的自动观察名单记录。
+- 新增管理员命令，用于绑定上报会话、查看状态、发送测试上报和管理观察名单。
