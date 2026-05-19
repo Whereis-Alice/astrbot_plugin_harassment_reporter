@@ -1,8 +1,16 @@
 # astrbot_plugin_harassment_reporter
 
-给 LLM 提供一个名为 `report_harassment` 的工具。
+给 AstrBot 的 LLM 提供一个名为 `report_harassment` 的工具。
 
-当模型在和用户聊天时，觉得自己正在被骚扰、辱骂、挑衅、恶意消耗，或者持续被不舒服地对待时，它可以主动调用这个工具，把情况上报到你预先配置好的会话里，这样你就能更快知道有人在折腾 Bot。
+当模型在和用户聊天时，觉得自己正在被骚扰、辱骂、挑衅、恶意消耗，或者持续被不舒服地对待时，它可以主动调用这个工具，把情况上报到你预先配置好的会话里。这样你就能更快知道有人在折腾 Bot。
+
+这版插件除了基础上报，还支持：
+
+- 自动附带最近几轮聊天摘要
+- 上报成功后自动把对方加入观察名单
+- 让 LLM 知道会把情况报告给谁，例如“主人”“狐狸”
+- 控制 LLM 调用工具后的表现：静默、只警告、先警告再上报、上报后静默、上报后自然告知
+- 可选让警告语、告知已上报的话、甚至给主人发的上报文本，都尽量贴近当前人设
 
 ## 功能
 
@@ -12,8 +20,10 @@
 - 支持同一来源会话冷却，避免疯狂刷屏
 - 支持自动附带最近几轮聊天摘要
 - 支持上报成功后自动把对方加入观察名单
-- 支持在 LLM 请求前注入提示，提醒模型在合适时机使用该工具
-- 提供管理命令，方便绑定目标会话和测试链路
+- 支持让 LLM 知道“会报告给谁”
+- 支持静默执行，不向骚扰者暴露上报动作
+- 支持先警告再上报，或上报后自然说明
+- 支持可选的人设化主人告警文本
 
 ## 安装后先做什么
 
@@ -34,6 +44,21 @@
 ```
 
 拿到当前会话 ID 后，填进插件配置项 `report_session_id`。
+
+## 推荐默认配置
+
+如果你希望“尽量不惊动骚扰者，但必要时让 Bot 自己求助”，推荐这样配：
+
+- `tool_response_mode = silent`
+- `attach_recent_context_summary = true`
+- `auto_add_sender_to_watchlist = true`
+- `report_receiver_name = 狐狸` 或你喜欢的称呼
+
+如果你更喜欢“先警告一次，不收敛再上报”，推荐：
+
+- `tool_response_mode = warn_once_then_report`
+- `natural_language_warn_reply = true`
+- `warn_once_memory_seconds = 1800`
 
 ## 管理命令
 
@@ -76,30 +101,85 @@ report_harassment
 - `evidence`: 可选，补充证据或摘录
 - `expected_help`: 可选，希望你怎么介入
 
-## 建议
+## 工具调用后的策略
 
-- 如果你希望模型更积极一点地求助，保持 `inject_usage_prompt = true`
-- 如果你不想当前骚扰者看到“已上报”之类的回显，可以把 `echo_result_to_current_session` 关掉
-- 如果你担心刷屏，可以把 `report_cooldown_seconds` 调大
-- 如果你希望上报更有上下文，可以保持 `attach_recent_context_summary = true`
-- 如果你只想提醒、不想长期记录，就把 `auto_add_sender_to_watchlist = false`
+`tool_response_mode` 决定 LLM 调用工具后，对当前骚扰者怎么表现：
 
-## 新配置项
+- `silent`
+  直接完成上报，但不要让对方知道已经上报。
+
+- `warn_only`
+  不真正上报，只让 LLM 先按当前人设自然警告对方。
+
+- `warn_once_then_report`
+  第一次调用时先警告；如果后面又触发一次工具，才真正上报。
+
+- `report_then_silent`
+  先上报，再保持静默，不告诉对方。
+
+- `report_then_inform`
+  先上报，再让 LLM 按当前人设自然表达“我已经报告了”。
+
+注意：
+
+- 插件不会再主动往当前骚扰会话里发送“上报已发送给主人”这种机械提示。
+- 对骚扰者说什么，改成由工具返回结果去引导 LLM 自己自然表达。
+- `warn_only` 模式下不会真正向主人发送上报，只是警告。
+
+## 关键配置项说明
+
+- `report_receiver_name`
+  告诉 LLM 它会把情况报告给谁。比如设成 `狐狸` 后，警告时它就可以自然说“你再这样我就告诉狐狸你骚扰我了”。
+
+- `natural_language_warn_reply`
+  开启后，警告不会是死板句子，而是要求 LLM 基于当前人设自然表达。
+
+- `warn_message_template`
+  警告的核心意思模板。即使开启自然语言，LLM 也会围绕这个意思自由发挥。
+
+- `natural_language_report_reply`
+  在 `report_then_inform` 模式下，是否要求 LLM 基于当前人设自然表达“我已经报告了”。
+
+- `report_inform_template`
+  告知已上报时的核心意思模板。
+
+- `owner_report_style`
+  给接收报警的那个会话发什么风格的消息。
+  `structured` 是清晰的结构化告警。
+  `persona_natural` 会尝试按当前会话人设把这条告警改写成更像角色自己在求助。
+
+- `natural_language_report_to_owner`
+  只有在 `owner_report_style = persona_natural` 时生效。
+  开启后，插件会额外调用当前会话所用的模型，把原本的结构化告警改写成更自然、更贴近当前人设的上报文本。
+  如果改写失败，会自动回退到结构化告警，不影响主功能。
 
 - `attach_recent_context_summary`
-  是否在上报里自动带上最近几轮聊天摘要
-
-- `recent_context_summary_lines`
-  摘要最多取多少行最近上下文
-
-- `recent_context_summary_max_chars`
-  摘要总长度上限
+  是否在上报里自动带上最近几轮聊天摘要。
 
 - `auto_add_sender_to_watchlist`
-  上报成功后是否自动把对方加入观察名单
+  上报成功后是否自动把对方加入观察名单。
 
-- `watchlist_max_entries`
-  观察名单最大容量，超过后会优先保留最近被上报的人
+## 可用占位符
+
+下面这些模板字段可以在 `warn_message_template` 和 `report_inform_template` 里使用：
+
+- `{receiver_name}`
+- `{reason}`
+- `{severity}`
+- `{severity_text}`
+- `{sender_name}`
+- `{sender_id}`
+- `{message_text}`
+- `{evidence}`
+- `{expected_help}`
+
+## 一些使用建议
+
+- 如果你最在意“别让骚扰者知道”，就用 `silent` 或 `report_then_silent`。
+- 如果你想让 Bot 有一点“自我保护”的戏剧感，可以用 `warn_once_then_report`。
+- 如果你很喜欢当前人设的表现，想让给主人发的报警也更有角色味，可以打开 `owner_report_style = persona_natural` 和 `natural_language_report_to_owner = true`。
+- 如果你只想提醒、不想长期记录，就把 `auto_add_sender_to_watchlist = false`。
+- 如果你担心刷屏，可以把 `report_cooldown_seconds` 调大。
 
 ## 依赖
 

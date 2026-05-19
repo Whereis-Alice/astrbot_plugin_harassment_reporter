@@ -15,8 +15,22 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.persona_error_reply import resolve_event_conversation_persona_id
 
 WATCHLIST_STORAGE_KEY = "watchlist_v1"
+WARN_CACHE_STORAGE_KEY = "warned_sessions_v1"
+
+TOOL_RESPONSE_MODES = {
+    "silent",
+    "warn_only",
+    "warn_once_then_report",
+    "report_then_silent",
+    "report_then_inform",
+}
+OWNER_REPORT_STYLES = {
+    "structured",
+    "persona_natural",
+}
 
 
 def _now_text() -> str:
@@ -52,6 +66,15 @@ def _normalize_context_line(line: str) -> str:
     if text.startswith("Assistant: "):
         return "助手: " + text[11:]
     return text
+
+
+def _message_chain_to_text(chain: MessageChain | None) -> str:
+    if chain is None:
+        return ""
+    try:
+        return chain.get_plain_text().strip()
+    except Exception:
+        return ""
 
 
 @dataclass
@@ -110,8 +133,8 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
     "astrbot_plugin_harassment_reporter",
     "Huli3",
     "让 LLM 在被骚扰时主动上报到指定会话，并支持附带近期摘要与观察名单",
-    "1.1.0",
-    "https://github.com/Huli3/astrbot_plugin_harassment_reporter",
+    "1.2.0",
+    "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter",
 )
 class HarassmentReporterPlugin(star.Star):
     """给 LLM 提供一个可主动求助的骚扰上报工具。"""
@@ -141,8 +164,8 @@ class HarassmentReporterPlugin(star.Star):
     def _report_target(self) -> str:
         return _clean_text(self._cfg("report_session_id", ""))
 
-    def _echo_enabled(self) -> bool:
-        return bool(self._cfg("echo_result_to_current_session", True))
+    def _report_receiver_name(self) -> str:
+        return _clean_text(self._cfg("report_receiver_name", ""), "主人")
 
     def _include_message_text(self) -> bool:
         return bool(self._cfg("include_message_text", True))
@@ -180,6 +203,32 @@ class HarassmentReporterPlugin(star.Star):
         except Exception:
             return 500
 
+    def _tool_response_mode(self) -> str:
+        mode = _clean_text(self._cfg("tool_response_mode", "silent"), "silent")
+        return mode if mode in TOOL_RESPONSE_MODES else "silent"
+
+    def _natural_warn_enabled(self) -> bool:
+        return bool(self._cfg("natural_language_warn_reply", True))
+
+    def _natural_inform_enabled(self) -> bool:
+        return bool(self._cfg("natural_language_report_reply", True))
+
+    def _owner_report_style(self) -> str:
+        style = _clean_text(
+            self._cfg("owner_report_style", "structured"),
+            "structured",
+        )
+        return style if style in OWNER_REPORT_STYLES else "structured"
+
+    def _owner_report_natural_enabled(self) -> bool:
+        return bool(self._cfg("natural_language_report_to_owner", False))
+
+    def _warn_memory_seconds(self) -> int:
+        try:
+            return max(0, int(self._cfg("warn_once_memory_seconds", 1800)))
+        except Exception:
+            return 1800
+
     def _severity_text(self, severity: str) -> str:
         mapping = {
             "low": "低",
@@ -196,6 +245,167 @@ class HarassmentReporterPlugin(star.Star):
 
     def _watch_key(self, event: AstrMessageEvent) -> str:
         return f"{self._platform_id(event)}:{_clean_text(event.get_sender_id(), 'unknown')}"
+
+    def _warn_cache_key(self, event: AstrMessageEvent) -> str:
+        session_id = _clean_text(event.unified_msg_origin, "unknown")
+        return f"{session_id}|{self._watch_key(event)}"
+
+    def _build_template_values(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+    ) -> dict[str, str]:
+        sender_name = _clean_text(event.get_sender_name(), "对方")
+        sender_id = _clean_text(event.get_sender_id(), "unknown")
+        receiver_name = self._report_receiver_name()
+        message_text = _clean_text(event.message_str, "")
+        return {
+            "receiver_name": receiver_name,
+            "reason": reason,
+            "severity": severity,
+            "severity_text": self._severity_text(severity),
+            "sender_name": sender_name,
+            "sender_id": sender_id,
+            "message_text": _truncate(message_text, self._max_excerpt_length()),
+            "evidence": _truncate(evidence, self._max_excerpt_length()),
+            "expected_help": _truncate(expected_help, 120),
+        }
+
+    def _render_template(self, template: str, values: dict[str, str]) -> str:
+        try:
+            return template.format(**values)
+        except Exception:
+            return template
+
+    def _warning_template(self) -> str:
+        custom = _clean_text(self._cfg("warn_message_template", ""))
+        if custom:
+            return custom
+        return "请立刻停止这种行为。你再这样，我就要告诉{receiver_name}你在骚扰我了。"
+
+    def _report_inform_template(self) -> str:
+        custom = _clean_text(self._cfg("report_inform_template", ""))
+        if custom:
+            return custom
+        return "我已经把你刚才的行为报告给{receiver_name}了。"
+
+    def _tool_warning_instruction(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+    ) -> str:
+        values = self._build_template_values(
+            event=event,
+            reason=reason,
+            severity=severity,
+            evidence=evidence,
+            expected_help=expected_help,
+        )
+        template = self._warning_template()
+        rendered = self._render_template(template, values)
+        if self._natural_warn_enabled():
+            return (
+                "不要提到工具调用，也不要说你收到了系统提示。"
+                "请基于你当前的人设，用自然语言向对方发出明确警告，"
+                f"核心意思要包含：{rendered}"
+            )
+        return rendered
+
+    def _tool_report_inform_instruction(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+    ) -> str:
+        values = self._build_template_values(
+            event=event,
+            reason=reason,
+            severity=severity,
+            evidence=evidence,
+            expected_help=expected_help,
+        )
+        template = self._report_inform_template()
+        rendered = self._render_template(template, values)
+        if self._natural_inform_enabled():
+            return (
+                "不要提到工具调用。"
+                "请基于你当前的人设，用自然语言向对方表达你已经进行了上报，"
+                f"核心意思要包含：{rendered}"
+            )
+        return rendered
+
+    def _silent_instruction(self) -> str:
+        return (
+            "上报已处理完毕。不要向当前用户透露你已经上报，"
+            "不要提到工具调用，也不要输出机械性的确认语。"
+            "你可以继续正常回复，或者在合适时自然结束当前对话。"
+        )
+
+    def _build_tool_result_text(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+        report_attempted: bool,
+        report_succeeded: bool,
+        was_warn_only: bool = False,
+        warning_reason: str = "",
+        error_message: str = "",
+    ) -> str:
+        if error_message:
+            return error_message
+
+        if was_warn_only:
+            return self._tool_warning_instruction(
+                event=event,
+                reason=warning_reason or reason,
+                severity=severity,
+                evidence=evidence,
+                expected_help=expected_help,
+            )
+
+        if not report_attempted:
+            return self._silent_instruction()
+
+        if not report_succeeded:
+            return (
+                "你刚刚尝试上报，但这次没有成功。"
+                "不要编造自己已经通知过任何人，也不要提到工具调用失败。"
+                "你可以根据当前人设自然地设定边界、拒绝继续被骚扰，或简短结束对话。"
+            )
+
+        mode = self._tool_response_mode()
+        if mode == "report_then_inform":
+            return self._tool_report_inform_instruction(
+                event=event,
+                reason=reason,
+                severity=severity,
+                evidence=evidence,
+                expected_help=expected_help,
+            )
+        if mode == "warn_only":
+            return self._tool_warning_instruction(
+                event=event,
+                reason=reason,
+                severity=severity,
+                evidence=evidence,
+                expected_help=expected_help,
+            )
+        return self._silent_instruction()
 
     def _should_skip_by_cooldown(self, source_session_id: str) -> tuple[bool, int]:
         cooldown = self._cooldown_seconds()
@@ -219,6 +429,43 @@ class HarassmentReporterPlugin(star.Star):
 
     async def _save_watchlist(self, watchlist: dict[str, dict[str, Any]]) -> None:
         await self.put_kv_data(WATCHLIST_STORAGE_KEY, watchlist)
+
+    async def _get_warn_cache(self) -> dict[str, float]:
+        data = await self.get_kv_data(WARN_CACHE_STORAGE_KEY, {})
+        if isinstance(data, dict):
+            return {str(k): float(v) for k, v in data.items()}
+        return {}
+
+    async def _save_warn_cache(self, warned: dict[str, float]) -> None:
+        await self.put_kv_data(WARN_CACHE_STORAGE_KEY, warned)
+
+    async def _cleanup_warn_cache(self, warned: dict[str, float]) -> dict[str, float]:
+        memory_seconds = self._warn_memory_seconds()
+        if memory_seconds <= 0:
+            return {}
+        cutoff = time.time() - memory_seconds
+        return {
+            key: ts
+            for key, ts in warned.items()
+            if float(ts) >= cutoff
+        }
+
+    async def _was_warned_before(self, event: AstrMessageEvent) -> bool:
+        warned = await self._cleanup_warn_cache(await self._get_warn_cache())
+        await self._save_warn_cache(warned)
+        return self._warn_cache_key(event) in warned
+
+    async def _mark_warned(self, event: AstrMessageEvent) -> None:
+        warned = await self._cleanup_warn_cache(await self._get_warn_cache())
+        warned[self._warn_cache_key(event)] = time.time()
+        await self._save_warn_cache(warned)
+
+    async def _clear_warned(self, event: AstrMessageEvent) -> None:
+        warned = await self._cleanup_warn_cache(await self._get_warn_cache())
+        key = self._warn_cache_key(event)
+        if key in warned:
+            del warned[key]
+            await self._save_warn_cache(warned)
 
     async def _get_watch_entry(self, event: AstrMessageEvent) -> dict[str, Any] | None:
         watchlist = await self._get_watchlist()
@@ -316,6 +563,176 @@ class HarassmentReporterPlugin(star.Star):
             logger.warning("[HarassmentReporter] failed to build recent context summary: %s", exc)
             return ""
 
+    async def _resolve_active_persona_prompt(self, event: AstrMessageEvent) -> str:
+        try:
+            cfg = self.context.get_config(umo=event.unified_msg_origin).get(
+                "provider_settings",
+                {},
+            )
+            conversation_persona_id = await resolve_event_conversation_persona_id(
+                event,
+                self.context.conversation_manager,
+            )
+            _, persona, _, use_webchat_special_default = (
+                await self.context.persona_manager.resolve_selected_persona(
+                    umo=event.unified_msg_origin,
+                    conversation_persona_id=conversation_persona_id,
+                    platform_name=event.get_platform_name(),
+                    provider_settings=cfg,
+                )
+            )
+            if use_webchat_special_default:
+                return ""
+            if persona and persona.get("prompt"):
+                return str(persona["prompt"]).strip()
+        except Exception as exc:
+            logger.warning("[HarassmentReporter] failed to resolve persona prompt: %s", exc)
+        return ""
+
+    async def _build_structured_owner_report_text(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+    ) -> str:
+        sender_name = _clean_text(event.get_sender_name(), "未知用户")
+        sender_id = _clean_text(event.get_sender_id(), "unknown")
+        session_id = _clean_text(event.unified_msg_origin, "unknown")
+        platform_id = self._platform_id(event)
+        message_text = _clean_text(event.message_str, "[无可读文本]")
+        existing_watch = await self._get_watch_entry(event)
+        recent_summary = await self._build_recent_context_summary(event)
+
+        lines = [
+            "【LLM 骚扰预警】",
+            f"时间：{_now_text()}",
+            f"严重程度：{self._severity_text(severity)} ({severity})",
+            f"来源平台：{platform_id}",
+            f"来源会话：{session_id}",
+            f"发送者：{sender_name} ({sender_id})",
+        ]
+
+        group_id = self._group_id(event)
+        if group_id:
+            lines.append(f"群组 ID：{group_id}")
+
+        lines.append(f"上报原因：{reason}")
+
+        if existing_watch:
+            lines.append(
+                "观察名单：已存在该用户，"
+                f"累计上报 {int(existing_watch.get('report_count', 0))} 次"
+            )
+
+        if evidence:
+            lines.append(f"补充证据：{_truncate(evidence, self._max_excerpt_length())}")
+
+        if expected_help:
+            lines.append(f"期望处理：{_truncate(expected_help, 120)}")
+
+        if self._include_message_text():
+            lines.append(f"当前消息：{_truncate(message_text, self._max_excerpt_length())}")
+
+        if recent_summary:
+            lines.append("")
+            lines.append("最近几轮聊天摘要：")
+            lines.append(recent_summary)
+
+        lines.append("")
+        lines.append("说明：这是模型在对话中主动调用 `report_harassment` 工具发出的提醒。")
+        return "\n".join(lines)
+
+    async def _try_build_persona_owner_report_text(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+    ) -> str:
+        try:
+            provider = self.context.get_using_provider(umo=event.unified_msg_origin)
+            if provider is None:
+                return ""
+
+            persona_prompt = await self._resolve_active_persona_prompt(event)
+            structured_text = await self._build_structured_owner_report_text(
+                event=event,
+                reason=reason,
+                severity=severity,
+                evidence=evidence,
+                expected_help=expected_help,
+            )
+            receiver_name = self._report_receiver_name()
+
+            system_prompt = (
+                "你要把一份骚扰上报整理成发给主人看的自然语言消息。"
+                "保留事实准确，不要编造不存在的细节，不要改变严重程度，"
+                "不要省略重要身份信息和来源信息。"
+                "输出一段完整中文消息即可，不要加解释，不要提到你是工具。"
+            )
+            if persona_prompt:
+                system_prompt += (
+                    "\n\n# 当前人设口吻参考\n"
+                    f"{persona_prompt}"
+                )
+
+            prompt = (
+                f"请把下面这份结构化骚扰上报，改写成一段发给“{receiver_name}”看的自然语言消息。"
+                "风格可以带有人设感，但仍然要清楚、可靠、便于主人理解情况。"
+                "要明确说明是谁、在哪个会话、因为什么、严重程度如何，"
+                "并在有证据、摘要、期望处理时自然带上。\n\n"
+                f"{structured_text}"
+            )
+            response = await self.context.llm_generate(
+                chat_provider_id=provider.meta().id,
+                prompt=prompt,
+                system_prompt=system_prompt,
+                tools=None,
+            )
+            return _message_chain_to_text(response.result_chain) or _clean_text(
+                response.completion_text
+            )
+        except Exception as exc:
+            logger.warning(
+                "[HarassmentReporter] failed to build persona-style owner report: %s",
+                exc,
+            )
+            return ""
+
+    async def _build_owner_report_text(
+        self,
+        *,
+        event: AstrMessageEvent,
+        reason: str,
+        severity: str,
+        evidence: str,
+        expected_help: str,
+    ) -> str:
+        style = self._owner_report_style()
+        if style == "persona_natural" and self._owner_report_natural_enabled():
+            natural_text = await self._try_build_persona_owner_report_text(
+                event=event,
+                reason=reason,
+                severity=severity,
+                evidence=evidence,
+                expected_help=expected_help,
+            )
+            if natural_text:
+                return natural_text
+
+        return await self._build_structured_owner_report_text(
+            event=event,
+            reason=reason,
+            severity=severity,
+            evidence=evidence,
+            expected_help=expected_help,
+        )
+
     async def _build_report_chain(
         self,
         *,
@@ -325,73 +742,14 @@ class HarassmentReporterPlugin(star.Star):
         evidence: str,
         expected_help: str,
     ) -> MessageChain:
-        sender_name = _clean_text(event.get_sender_name(), "未知用户")
-        sender_id = _clean_text(event.get_sender_id(), "unknown")
-        session_id = _clean_text(event.unified_msg_origin, "unknown")
-        platform_id = self._platform_id(event)
-        message_text = _clean_text(event.message_str, "[无可读文本]")
-        existing_watch = await self._get_watch_entry(event)
-        recent_summary = await self._build_recent_context_summary(event)
-
-        chain = MessageChain()
-        chain.message("【LLM 骚扰预警】\n")
-        chain.message(f"时间：{_now_text()}\n")
-        chain.message(f"严重程度：{self._severity_text(severity)} ({severity})\n")
-        chain.message(f"来源平台：{platform_id}\n")
-        chain.message(f"来源会话：{session_id}\n")
-        chain.message(f"发送者：{sender_name} ({sender_id})\n")
-
-        group_id = self._group_id(event)
-        if group_id:
-            chain.message(f"群组 ID：{group_id}\n")
-
-        chain.message(f"上报原因：{reason}\n")
-
-        if existing_watch:
-            chain.message(
-                "观察名单：已存在该用户，"
-                f"累计上报 {int(existing_watch.get('report_count', 0))} 次\n"
-            )
-
-        if evidence:
-            chain.message(f"补充证据：{_truncate(evidence, self._max_excerpt_length())}\n")
-
-        if expected_help:
-            chain.message(f"期望处理：{_truncate(expected_help, 120)}\n")
-
-        if self._include_message_text():
-            chain.message(
-                f"当前消息：{_truncate(message_text, self._max_excerpt_length())}\n"
-            )
-
-        if recent_summary:
-            chain.message("\n最近几轮聊天摘要：\n")
-            chain.message(recent_summary)
-            chain.message("\n")
-
-        chain.message(
-            "\n说明：这是模型在对话中主动调用 `report_harassment` 工具发出的提醒。"
+        report_text = await self._build_owner_report_text(
+            event=event,
+            reason=reason,
+            severity=severity,
+            evidence=evidence,
+            expected_help=expected_help,
         )
-        return chain
-
-    async def _echo_result_to_source(
-        self,
-        *,
-        event: AstrMessageEvent,
-        result: str,
-    ) -> None:
-        if not self._echo_enabled():
-            return
-
-        source_session_id = _clean_text(event.unified_msg_origin)
-        target_session_id = self._report_target()
-        if not source_session_id or source_session_id == target_session_id:
-            return
-
-        await self.context.send_message(
-            source_session_id,
-            MessageChain().message(result),
-        )
+        return MessageChain().message(report_text)
 
     async def _send_report(
         self,
@@ -402,29 +760,19 @@ class HarassmentReporterPlugin(star.Star):
         evidence: str,
         expected_help: str,
         ignore_cooldown: bool = False,
-        echo_to_source: bool = False,
-    ) -> str:
+    ) -> tuple[str, str]:
         if not self._is_enabled():
-            result = "上报未执行：插件当前已禁用。"
-            if echo_to_source:
-                await self._echo_result_to_source(event=event, result=result)
-            return result
+            return "disabled", "上报未执行：插件当前已禁用。"
 
         target_session_id = self._report_target()
         if not target_session_id:
-            result = "上报未执行：还没有配置接收上报的会话 ID。"
-            if echo_to_source:
-                await self._echo_result_to_source(event=event, result=result)
-            return result
+            return "unconfigured", "上报未执行：还没有配置接收上报的会话 ID。"
 
         source_session_id = _clean_text(event.unified_msg_origin, "unknown")
         if not ignore_cooldown:
             skipped, remaining = self._should_skip_by_cooldown(source_session_id)
             if skipped:
-                result = f"上报已跳过：当前会话仍在冷却中，还需等待约 {remaining} 秒。"
-                if echo_to_source:
-                    await self._echo_result_to_source(event=event, result=result)
-                return result
+                return "cooldown", f"上报已跳过：当前会话仍在冷却中，还需等待约 {remaining} 秒。"
 
         chain = await self._build_report_chain(
             event=event,
@@ -436,13 +784,11 @@ class HarassmentReporterPlugin(star.Star):
 
         ok = await self.context.send_message(target_session_id, chain)
         if not ok:
-            result = (
+            return (
+                "send_failed",
                 "上报失败：AstrBot 没有找到这个会话对应的平台实例。"
-                "请确认 `report_session_id` 是否正确。"
+                "请确认 `report_session_id` 是否正确。",
             )
-            if echo_to_source:
-                await self._echo_result_to_source(event=event, result=result)
-            return result
 
         self._mark_reported(source_session_id)
         await self._add_sender_to_watchlist(
@@ -450,16 +796,14 @@ class HarassmentReporterPlugin(star.Star):
             reason=reason,
             severity=severity,
         )
+        await self._clear_warned(event)
         logger.info(
             "[HarassmentReporter] report sent | source=%s target=%s severity=%s",
             source_session_id,
             target_session_id,
             severity,
         )
-        result = "上报已发送给主人。"
-        if echo_to_source:
-            await self._echo_result_to_source(event=event, result=result)
-        return result
+        return "ok", "上报已发送。"
 
     async def handle_tool_report(
         self,
@@ -471,13 +815,69 @@ class HarassmentReporterPlugin(star.Star):
         expected_help: str,
     ) -> str:
         severity = severity if severity in {"low", "medium", "high"} else "medium"
-        return await self._send_report(
+        mode = self._tool_response_mode()
+
+        if mode == "warn_only":
+            await self._mark_warned(event)
+            return self._build_tool_result_text(
+                event=event,
+                reason=reason,
+                severity=severity,
+                evidence=evidence,
+                expected_help=expected_help,
+                report_attempted=False,
+                report_succeeded=False,
+                was_warn_only=True,
+            )
+
+        if mode == "warn_once_then_report":
+            if not await self._was_warned_before(event):
+                await self._mark_warned(event)
+                return self._build_tool_result_text(
+                    event=event,
+                    reason=reason,
+                    severity=severity,
+                    evidence=evidence,
+                    expected_help=expected_help,
+                    report_attempted=False,
+                    report_succeeded=False,
+                    was_warn_only=True,
+                    warning_reason=reason,
+                )
+
+        status, result = await self._send_report(
             event=event,
             reason=reason,
             severity=severity,
             evidence=evidence,
             expected_help=expected_help,
-            echo_to_source=True,
+        )
+        if status == "cooldown":
+            if mode == "report_then_inform":
+                return self._tool_report_inform_instruction(
+                    event=event,
+                    reason=reason,
+                    severity=severity,
+                    evidence=evidence,
+                    expected_help=expected_help,
+                )
+            return self._silent_instruction()
+
+        if status in {"disabled", "unconfigured", "send_failed"}:
+            return (
+                "你刚刚尝试求助，但这次没有成功。"
+                "不要提到工具调用，也不要假装已经通知了任何人。"
+                "请根据当前人设自然地设定边界、拒绝继续被骚扰，或简短结束对话。"
+            )
+
+        return self._build_tool_result_text(
+            event=event,
+            reason=reason,
+            severity=severity,
+            evidence=evidence,
+            expected_help=expected_help,
+            report_attempted=True,
+            report_succeeded=status == "ok",
         )
 
     def _format_watchlist_entry(self, key: str, entry: dict[str, Any]) -> str:
@@ -507,6 +907,16 @@ class HarassmentReporterPlugin(star.Star):
         if not self._report_target():
             return
 
+        receiver_name = self._report_receiver_name()
+        mode = self._tool_response_mode()
+        mode_hint = {
+            "silent": "上报成功后，默认不要让对方知道你已经上报。",
+            "warn_only": f"调用后优先只发出警告，可以自然提到你会告诉{receiver_name}。",
+            "warn_once_then_report": f"第一次调用时先警告；如果对方继续骚扰，再次调用时再正式上报给{receiver_name}。",
+            "report_then_silent": "调用后先完成上报，但不要向对方透露你已经上报。",
+            "report_then_inform": f"调用后先完成上报，再自然告诉对方你已经报告给{receiver_name}。",
+        }.get(mode, "")
+
         hint = TextPart(
             text=(
                 "[可用安全工具提示]\n"
@@ -517,6 +927,7 @@ class HarassmentReporterPlugin(star.Star):
                 "- `severity`: low / medium / high\n"
                 "- `evidence`: 可选，摘录关键内容\n"
                 "- `expected_help`: 可选，希望主人如何介入\n"
+                f"{mode_hint}\n"
                 "只有在你真觉得需要提醒主人时才调用，不要因为普通分歧或正常玩笑滥用。"
             )
         ).mark_as_temp()
@@ -565,8 +976,12 @@ class HarassmentReporterPlugin(star.Star):
             "骚扰上报插件状态：\n"
             f"- 启用：{self._is_enabled()}\n"
             f"- 接收会话：{target}\n"
+            f"- 接收人称呼：{self._report_receiver_name()}\n"
             f"- 冷却秒数：{self._cooldown_seconds()}\n"
-            f"- 回显结果：{self._echo_enabled()}\n"
+            f"- 工具回应策略：{self._tool_response_mode()}\n"
+            f"- 警告使用自然语言：{self._natural_warn_enabled()}\n"
+            f"- 告知已上报使用自然语言：{self._natural_inform_enabled()}\n"
+            f"- 给主人的上报风格：{self._owner_report_style()}\n"
             f"- 注入提示：{self._prompt_enabled()}\n"
             f"- 包含原消息：{self._include_message_text()}\n"
             f"- 附带最近摘要：{self._recent_summary_enabled()}\n"
@@ -578,7 +993,7 @@ class HarassmentReporterPlugin(star.Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("harassment_test")
     async def harassment_test(self, event: AstrMessageEvent, note: str | None = None) -> None:
-        result = await self._send_report(
+        status, result = await self._send_report(
             event=event,
             reason="管理员主动测试骚扰上报链路",
             severity="low",
@@ -586,6 +1001,9 @@ class HarassmentReporterPlugin(star.Star):
             expected_help="无需处理，确认你能收到即可。",
             ignore_cooldown=True,
         )
+        if status == "ok":
+            yield event.plain_result("测试上报已发送。")
+            return
         yield event.plain_result(result)
 
     @filter.permission_type(filter.PermissionType.ADMIN)
