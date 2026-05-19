@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## 1.2.2 - 2026-05-20
+
+### Added
+
+- Added configurable `watchlist_snapshot` so the current observation list is visible directly in the plugin config page as a synced text snapshot.
+
+### Changed
+
+- Relaxed watchlist viewing so `/harassment_watchlist` can be used either by AstrBot admins or inside the bound harassment-report receiver session.
+- Synced watchlist snapshot content automatically on plugin initialization and whenever the watchlist changes.
+- Updated plugin metadata to version `1.2.2`.
+
 ## 1.2.1 - 2026-05-19
 
 ### Added

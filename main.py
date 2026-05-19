@@ -133,7 +133,7 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
     "astrbot_plugin_harassment_reporter",
     "Huli3",
     "让 LLM 在被骚扰时主动上报到指定会话，并支持附带近期摘要与观察名单",
-    "1.2.0",
+    "1.2.2",
     "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter",
 )
 class HarassmentReporterPlugin(star.Star):
@@ -146,6 +146,9 @@ class HarassmentReporterPlugin(star.Star):
         self._tool = HarassmentReportTool(plugin=self)
         self.context.add_llm_tools(self._tool)
         self._last_report_at: dict[str, float] = {}
+
+    async def initialize(self) -> None:
+        await self._sync_watchlist_snapshot()
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         if self.config is None:
@@ -163,6 +166,15 @@ class HarassmentReporterPlugin(star.Star):
 
     def _report_target(self) -> str:
         return _clean_text(self._cfg("report_session_id", ""))
+
+    def _is_report_receiver_session(self, event: AstrMessageEvent) -> bool:
+        target = self._report_target()
+        if not target:
+            return False
+        return _clean_text(event.unified_msg_origin, "unknown") == target
+
+    def _can_view_watchlist(self, event: AstrMessageEvent) -> bool:
+        return event.is_admin() or self._is_report_receiver_session(event)
 
     def _report_receiver_name(self) -> str:
         return _clean_text(self._cfg("report_receiver_name", ""), "主人")
@@ -434,6 +446,7 @@ class HarassmentReporterPlugin(star.Star):
 
     async def _save_watchlist(self, watchlist: dict[str, dict[str, Any]]) -> None:
         await self.put_kv_data(WATCHLIST_STORAGE_KEY, watchlist)
+        await self._sync_watchlist_snapshot(watchlist)
 
     async def _get_warn_cache(self) -> dict[str, float]:
         data = await self.get_kv_data(WARN_CACHE_STORAGE_KEY, {})
@@ -526,6 +539,38 @@ class HarassmentReporterPlugin(star.Star):
 
     async def _clear_watchlist(self) -> None:
         await self._save_watchlist({})
+
+    def _format_watchlist_snapshot(self, watchlist: dict[str, dict[str, Any]]) -> str:
+        if not watchlist:
+            return "观察名单为空。"
+
+        sorted_items = sorted(
+            watchlist.items(),
+            key=lambda item: float(item[1].get("last_reported_at", 0)),
+            reverse=True,
+        )
+        lines = [f"观察名单快照（共 {len(watchlist)} 人，更新于 {_now_text()}）："]
+        for key, entry in sorted_items:
+            lines.append(self._format_watchlist_entry(key, entry))
+        return "\n".join(lines)
+
+    async def _sync_watchlist_snapshot(
+        self,
+        watchlist: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
+        if self.config is None:
+            return
+
+        if watchlist is None:
+            watchlist = await self._get_watchlist()
+
+        snapshot = self._format_watchlist_snapshot(watchlist)
+        current = _clean_text(self.config.get("watchlist_snapshot", ""))
+        if current == snapshot:
+            return
+
+        self.config["watchlist_snapshot"] = snapshot
+        self.config.save_config()
 
     async def _build_recent_context_summary(self, event: AstrMessageEvent) -> str:
         if not self._recent_summary_enabled():
@@ -1017,9 +1062,15 @@ class HarassmentReporterPlugin(star.Star):
             return
         yield event.plain_result(result)
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("harassment_watchlist")
     async def harassment_watchlist(self, event: AstrMessageEvent) -> None:
+        if not self._can_view_watchlist(event):
+            yield event.plain_result(
+                "你目前不能查看观察名单。\n"
+                "请使用管理员账号，或在已绑定的骚扰上报接收会话里执行 `/harassment_watchlist`。"
+            )
+            return
+
         watchlist = await self._get_watchlist()
         if not watchlist:
             yield event.plain_result("观察名单为空。")
@@ -1040,9 +1091,15 @@ class HarassmentReporterPlugin(star.Star):
 
         yield event.plain_result("\n".join(lines))
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("harassment_watch_remove")
     async def harassment_watch_remove(self, event: AstrMessageEvent, key: str | None = None) -> None:
+        if not self._can_view_watchlist(event):
+            yield event.plain_result(
+                "你目前不能修改观察名单。\n"
+                "请使用管理员账号，或在已绑定的骚扰上报接收会话里执行这个命令。"
+            )
+            return
+
         target_key = _clean_text(key)
         if not target_key:
             yield event.plain_result(
@@ -1058,8 +1115,14 @@ class HarassmentReporterPlugin(star.Star):
 
         yield event.plain_result(f"已从观察名单移除：{target_key}")
 
-    @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("harassment_watch_clear")
     async def harassment_watch_clear(self, event: AstrMessageEvent) -> None:
+        if not self._can_view_watchlist(event):
+            yield event.plain_result(
+                "你目前不能清空观察名单。\n"
+                "请使用管理员账号，或在已绑定的骚扰上报接收会话里执行这个命令。"
+            )
+            return
+
         await self._clear_watchlist()
         yield event.plain_result("已清空观察名单。")

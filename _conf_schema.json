@@ -130,6 +130,13 @@
       "auto_add_sender_to_watchlist": true
     }
   },
+  "watchlist_snapshot": {
+    "type": "text",
+    "description": "当前观察名单快照",
+    "default": "",
+    "hint": "这是插件自动同步的只读快照；如需增删，请用观察名单相关命令",
+    "obvious_hint": true
+  },
   "owner_report_style": {
     "type": "string",
     "description": "给主人的上报风格",
