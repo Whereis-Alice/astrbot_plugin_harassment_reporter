@@ -1,0 +1,82 @@
+{
+  "enable": {
+    "type": "bool",
+    "description": "启用骚扰上报插件",
+    "default": true
+  },
+  "report_session_id": {
+    "type": "string",
+    "description": "接收骚扰上报的会话 ID",
+    "default": "",
+    "hint": "可先在目标会话里执行 /harassment_sid 查看，再填写这里；也可以直接在目标会话中执行 /harassment_bind_here"
+  },
+  "report_cooldown_seconds": {
+    "type": "int",
+    "description": "同一来源会话的上报冷却时间（秒）",
+    "default": 300,
+    "min": 0,
+    "max": 86400
+  },
+  "inject_usage_prompt": {
+    "type": "bool",
+    "description": "在每轮 LLM 请求前注入工具使用提示",
+    "default": true
+  },
+  "echo_result_to_current_session": {
+    "type": "bool",
+    "description": "工具调用后，是否在当前会话回显执行结果",
+    "default": true
+  },
+  "include_message_text": {
+    "type": "bool",
+    "description": "上报时是否附带触发时的当前消息文本",
+    "default": true
+  },
+  "attach_recent_context_summary": {
+    "type": "bool",
+    "description": "上报时自动附带最近几轮聊天摘要",
+    "default": true
+  },
+  "recent_context_summary_lines": {
+    "type": "int",
+    "description": "最近几轮聊天摘要包含的最大行数",
+    "default": 6,
+    "min": 1,
+    "max": 20,
+    "condition": {
+      "attach_recent_context_summary": true
+    }
+  },
+  "recent_context_summary_max_chars": {
+    "type": "int",
+    "description": "最近几轮聊天摘要的最大字符数",
+    "default": 600,
+    "min": 80,
+    "max": 4000,
+    "condition": {
+      "attach_recent_context_summary": true
+    }
+  },
+  "auto_add_sender_to_watchlist": {
+    "type": "bool",
+    "description": "上报成功后自动把对方加入观察名单",
+    "default": true
+  },
+  "watchlist_max_entries": {
+    "type": "int",
+    "description": "观察名单最多保留的人数",
+    "default": 500,
+    "min": 1,
+    "max": 5000,
+    "condition": {
+      "auto_add_sender_to_watchlist": true
+    }
+  },
+  "max_excerpt_length": {
+    "type": "int",
+    "description": "上报中单段文本的最大长度",
+    "default": 300,
+    "min": 50,
+    "max": 2000
+  }
+}
