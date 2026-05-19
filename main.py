@@ -133,7 +133,7 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
     "astrbot_plugin_harassment_reporter",
     "Huli3",
     "让 LLM 在被骚扰时主动上报到指定会话，并支持附带近期摘要与观察名单",
-    "1.2.2",
+    "1.2.3",
     "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter",
 )
 class HarassmentReporterPlugin(star.Star):
@@ -148,7 +148,7 @@ class HarassmentReporterPlugin(star.Star):
         self._last_report_at: dict[str, float] = {}
 
     async def initialize(self) -> None:
-        await self._sync_watchlist_snapshot()
+        await self._migrate_watchlist_to_config()
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         if self.config is None:
@@ -214,6 +214,113 @@ class HarassmentReporterPlugin(star.Star):
             return max(1, int(self._cfg("watchlist_max_entries", 500)))
         except Exception:
             return 500
+
+    def _get_config_watchlist_rows(self) -> list[dict[str, Any]]:
+        raw = self._cfg("watchlist_entries", [])
+        if not isinstance(raw, list):
+            return []
+        return [item for item in raw if isinstance(item, dict)]
+
+    def _normalize_watchlist_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        sender_id = _clean_text(row.get("sender_id"))
+        platform_id = _clean_text(row.get("platform_id"))
+        key = _clean_text(row.get("key"))
+
+        if not key and sender_id:
+            key = f"{platform_id or 'default'}:{sender_id}"
+        if not key:
+            return None
+
+        if not sender_id and ":" in key:
+            sender_id = key.split(":", 1)[1]
+        if not platform_id and ":" in key:
+            platform_id = key.split(":", 1)[0]
+
+        normalized = {
+            "key": key,
+            "sender_id": sender_id or "unknown",
+            "sender_name": _clean_text(row.get("sender_name"), "未知用户"),
+            "platform_id": platform_id or "unknown",
+            "note": _truncate(_clean_text(row.get("note")), 200),
+            "enabled": bool(row.get("enabled", True)),
+        }
+        return normalized
+
+    def _config_watchlist_to_dict(self) -> dict[str, dict[str, Any]]:
+        watchlist: dict[str, dict[str, Any]] = {}
+        for raw_row in self._get_config_watchlist_rows():
+            row = self._normalize_watchlist_row(raw_row)
+            if row is None:
+                continue
+            key = row.pop("key")
+            if not row.get("enabled", True):
+                continue
+            watchlist[key] = row
+        return watchlist
+
+    async def _save_config_watchlist(self, watchlist: dict[str, dict[str, Any]]) -> None:
+        if self.config is None:
+            return
+
+        sorted_items = sorted(
+            watchlist.items(),
+            key=lambda item: (
+                _clean_text(item[1].get("sender_name")),
+                item[0],
+            ),
+        )
+        rows = []
+        for key, entry in sorted_items:
+            rows.append(
+                {
+                    "key": key,
+                    "sender_id": _clean_text(entry.get("sender_id"), "unknown"),
+                    "sender_name": _clean_text(entry.get("sender_name"), "未知用户"),
+                    "platform_id": _clean_text(entry.get("platform_id"), "unknown"),
+                    "note": _truncate(_clean_text(entry.get("note")), 200),
+                    "enabled": bool(entry.get("enabled", True)),
+                }
+            )
+
+        if self.config.get("watchlist_entries", []) == rows:
+            return
+
+        self.config["watchlist_entries"] = rows
+        self.config.save_config()
+
+    async def _migrate_watchlist_to_config(self) -> None:
+        if self.config is None:
+            return
+
+        existing_rows = self._get_config_watchlist_rows()
+        if existing_rows:
+            normalized_dict = self._config_watchlist_to_dict()
+            await self._save_config_watchlist(normalized_dict)
+            return
+
+        legacy_watchlist = await self.get_kv_data(WATCHLIST_STORAGE_KEY, {})
+        if not isinstance(legacy_watchlist, dict) or not legacy_watchlist:
+            if self.config.get("watchlist_snapshot") is not None:
+                self.config["watchlist_snapshot"] = ""
+                self.config.save_config()
+            return
+
+        migrated: dict[str, dict[str, Any]] = {}
+        for key, entry in legacy_watchlist.items():
+            if not isinstance(entry, dict):
+                continue
+            migrated[str(key)] = {
+                "sender_id": _clean_text(entry.get("sender_id"), "unknown"),
+                "sender_name": _clean_text(entry.get("sender_name"), "未知用户"),
+                "platform_id": _clean_text(entry.get("platform_id"), "unknown"),
+                "note": _truncate(_clean_text(entry.get("last_reason")), 200),
+                "enabled": True,
+            }
+        await self._save_config_watchlist(migrated)
+
+        if self.config.get("watchlist_snapshot") is not None:
+            self.config["watchlist_snapshot"] = ""
+            self.config.save_config()
 
     def _tool_response_mode(self) -> str:
         mode = _clean_text(self._cfg("tool_response_mode", "silent"), "silent")
@@ -439,14 +546,58 @@ class HarassmentReporterPlugin(star.Star):
         self._last_report_at[source_session_id] = time.time()
 
     async def _get_watchlist(self) -> dict[str, dict[str, Any]]:
-        data = await self.get_kv_data(WATCHLIST_STORAGE_KEY, {})
-        if isinstance(data, dict):
-            return data
-        return {}
+        config_watchlist = self._config_watchlist_to_dict()
+        metadata = await self.get_kv_data(WATCHLIST_STORAGE_KEY, {})
+        metadata = metadata if isinstance(metadata, dict) else {}
+
+        merged: dict[str, dict[str, Any]] = {}
+        for key, row in config_watchlist.items():
+            meta = metadata.get(key, {})
+            meta = meta if isinstance(meta, dict) else {}
+            merged[key] = {
+                "sender_id": row.get("sender_id", "unknown"),
+                "sender_name": row.get("sender_name", "未知用户"),
+                "platform_id": row.get("platform_id", "unknown"),
+                "note": row.get("note", ""),
+                "enabled": bool(row.get("enabled", True)),
+                "group_id": _clean_text(meta.get("group_id")),
+                "last_session_id": _clean_text(meta.get("last_session_id")),
+                "first_reported_at": float(meta.get("first_reported_at", 0) or 0),
+                "last_reported_at": float(meta.get("last_reported_at", 0) or 0),
+                "report_count": int(meta.get("report_count", 0) or 0),
+                "last_reason": _clean_text(meta.get("last_reason")) or row.get("note", ""),
+                "last_severity": _clean_text(meta.get("last_severity"), "unknown"),
+            }
+        return merged
 
     async def _save_watchlist(self, watchlist: dict[str, dict[str, Any]]) -> None:
-        await self.put_kv_data(WATCHLIST_STORAGE_KEY, watchlist)
-        await self._sync_watchlist_snapshot(watchlist)
+        normalized: dict[str, dict[str, Any]] = {}
+        metadata: dict[str, dict[str, Any]] = {}
+
+        for key, raw_entry in watchlist.items():
+            entry = raw_entry if isinstance(raw_entry, dict) else {}
+            normalized[key] = {
+                "sender_id": _clean_text(entry.get("sender_id"), "unknown"),
+                "sender_name": _clean_text(entry.get("sender_name"), "未知用户"),
+                "platform_id": _clean_text(entry.get("platform_id"), "unknown"),
+                "note": _truncate(
+                    _clean_text(entry.get("note")) or _clean_text(entry.get("last_reason")),
+                    200,
+                ),
+                "enabled": bool(entry.get("enabled", True)),
+            }
+            metadata[key] = {
+                "group_id": _clean_text(entry.get("group_id")),
+                "last_session_id": _clean_text(entry.get("last_session_id")),
+                "first_reported_at": float(entry.get("first_reported_at", 0) or 0),
+                "last_reported_at": float(entry.get("last_reported_at", 0) or 0),
+                "report_count": int(entry.get("report_count", 0) or 0),
+                "last_reason": _truncate(_clean_text(entry.get("last_reason")), 200),
+                "last_severity": _clean_text(entry.get("last_severity"), "unknown"),
+            }
+
+        await self._save_config_watchlist(normalized)
+        await self.put_kv_data(WATCHLIST_STORAGE_KEY, metadata)
 
     async def _get_warn_cache(self) -> dict[str, float]:
         data = await self.get_kv_data(WARN_CACHE_STORAGE_KEY, {})
@@ -537,40 +688,26 @@ class HarassmentReporterPlugin(star.Star):
         await self._save_watchlist(watchlist)
         return True
 
+    async def _resolve_watchlist_key(self, value: str) -> str:
+        target = _clean_text(value)
+        if not target:
+            return ""
+
+        watchlist = await self._get_watchlist()
+        if target in watchlist:
+            return target
+
+        matched_keys = [
+            key
+            for key, entry in watchlist.items()
+            if _clean_text(entry.get("sender_id")) == target
+        ]
+        if len(matched_keys) == 1:
+            return matched_keys[0]
+        return target
+
     async def _clear_watchlist(self) -> None:
         await self._save_watchlist({})
-
-    def _format_watchlist_snapshot(self, watchlist: dict[str, dict[str, Any]]) -> str:
-        if not watchlist:
-            return "观察名单为空。"
-
-        sorted_items = sorted(
-            watchlist.items(),
-            key=lambda item: float(item[1].get("last_reported_at", 0)),
-            reverse=True,
-        )
-        lines = [f"观察名单快照（共 {len(watchlist)} 人，更新于 {_now_text()}）："]
-        for key, entry in sorted_items:
-            lines.append(self._format_watchlist_entry(key, entry))
-        return "\n".join(lines)
-
-    async def _sync_watchlist_snapshot(
-        self,
-        watchlist: dict[str, dict[str, Any]] | None = None,
-    ) -> None:
-        if self.config is None:
-            return
-
-        if watchlist is None:
-            watchlist = await self._get_watchlist()
-
-        snapshot = self._format_watchlist_snapshot(watchlist)
-        current = _clean_text(self.config.get("watchlist_snapshot", ""))
-        if current == snapshot:
-            return
-
-        self.config["watchlist_snapshot"] = snapshot
-        self.config.save_config()
 
     async def _build_recent_context_summary(self, event: AstrMessageEvent) -> str:
         if not self._recent_summary_enabled():
@@ -940,11 +1077,13 @@ class HarassmentReporterPlugin(star.Star):
         severity = _clean_text(entry.get("last_severity"), "unknown")
         reason = _truncate(_clean_text(entry.get("last_reason")), 80)
         updated_at = _format_ts(entry.get("last_reported_at"))
+        note = _truncate(_clean_text(entry.get("note")), 80)
         return (
             f"- {key}\n"
             f"  用户：{sender_name} ({sender_id}) | 平台：{platform_id}\n"
             f"  次数：{report_count} | 最后严重度：{severity} | 最后时间：{updated_at}\n"
-            f"  最后原因：{reason}"
+            f"  最后原因：{reason}\n"
+            f"  备注：{note or '-'}"
         )
 
     @filter.on_llm_request(priority=-5)
@@ -1100,11 +1239,12 @@ class HarassmentReporterPlugin(star.Star):
             )
             return
 
-        target_key = _clean_text(key)
+        target_key = await self._resolve_watchlist_key(_clean_text(key))
         if not target_key:
             yield event.plain_result(
-                "请提供要移除的观察名单键，例如：\n"
-                "/harassment_watch_remove aiocqhttp:123456"
+                "请提供要移除的观察名单键或用户 ID，例如：\n"
+                "/harassment_watch_remove default:2127074778\n"
+                "/harassment_watch_remove 2127074778"
             )
             return
 

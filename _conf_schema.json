@@ -130,12 +130,58 @@
       "auto_add_sender_to_watchlist": true
     }
   },
+  "watchlist_entries": {
+    "type": "template_list",
+    "description": "观察名单",
+    "default": [],
+    "hint": "这里可以直接查看、添加、删除或修改观察对象；命令和自动观察也会共用这份名单",
+    "obvious_hint": true,
+    "templates": {
+      "watch_target": {
+        "name": "观察对象",
+        "items": {
+          "key": {
+            "type": "string",
+            "description": "唯一键",
+            "default": "",
+            "hint": "建议填写成 平台:用户ID，例如 default:2127074778；如果留空，插件会根据平台和用户 ID 自动补出来"
+          },
+          "sender_id": {
+            "type": "string",
+            "description": "用户 ID",
+            "default": ""
+          },
+          "sender_name": {
+            "type": "string",
+            "description": "显示名称",
+            "default": ""
+          },
+          "platform_id": {
+            "type": "string",
+            "description": "平台标识",
+            "default": "default"
+          },
+          "note": {
+            "type": "string",
+            "description": "备注",
+            "default": "",
+            "hint": "可写上手动备注，或留空让插件用最近一次上报原因补充"
+          },
+          "enabled": {
+            "type": "bool",
+            "description": "启用",
+            "default": true
+          }
+        }
+      }
+    }
+  },
   "watchlist_snapshot": {
     "type": "text",
-    "description": "当前观察名单快照",
+    "description": "旧版观察名单快照（已弃用）",
     "default": "",
-    "hint": "这是插件自动同步的只读快照；如需增删，请用观察名单相关命令",
-    "obvious_hint": true
+    "hint": "已改用下方的“观察名单”可编辑列表；这个旧字段仅用于兼容迁移，后续可忽略",
+    "invisible": true
   },
   "owner_report_style": {
     "type": "string",

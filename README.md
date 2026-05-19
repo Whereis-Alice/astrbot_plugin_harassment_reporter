@@ -78,7 +78,7 @@
   发送一条测试上报，确认链路是否正常
 
 - `/harassment_watchlist`
-  查看观察名单
+  查看观察名单和最近统计信息
   管理员可以直接用；如果你不是平台管理员，也可以在已绑定的骚扰上报接收会话里使用。
 
 - `/harassment_watch_remove <平台:用户ID>`
@@ -172,10 +172,10 @@ report_harassment
 - `auto_add_sender_to_watchlist`
   上报成功后是否自动把对方加入观察名单。
 
-- `watchlist_snapshot`
-  配置页里展示的观察名单快照。
-  这是插件自动同步出来的只读文本，方便你直接在配置项里查看当前有哪些观察对象。
-  如果要增删观察名单，请继续使用 `/harassment_watchlist`、`/harassment_watch_remove`、`/harassment_watch_clear`。
+- `watchlist_entries`
+  配置页里的可编辑观察名单。
+  你可以直接在这里查看、添加、删除或修改观察对象；命令 `/harassment_watchlist`、`/harassment_watch_remove`、`/harassment_watch_clear` 和自动加入观察名单也会共用这份数据。
+  建议把 `key` 填成 `平台:用户ID`，例如 `default:2127074778`。
 
 ## 可用占位符
 
