@@ -133,7 +133,7 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
     "astrbot_plugin_harassment_reporter",
     "Huli3",
     "让 LLM 在被骚扰时主动上报到指定会话，并支持附带近期摘要与观察名单",
-    "1.2.3",
+    "1.2.4",
     "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter",
 )
 class HarassmentReporterPlugin(star.Star):
@@ -149,6 +149,7 @@ class HarassmentReporterPlugin(star.Star):
 
     async def initialize(self) -> None:
         await self._migrate_watchlist_to_config()
+        await self._ensure_watchlist_template_keys()
 
     def _cfg(self, key: str, default: Any = None) -> Any:
         if self.config is None:
@@ -222,6 +223,10 @@ class HarassmentReporterPlugin(star.Star):
         return [item for item in raw if isinstance(item, dict)]
 
     def _normalize_watchlist_row(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        template_key = _clean_text(row.get("__template_key"))
+        if template_key and template_key != "watch_target":
+            return None
+
         sender_id = _clean_text(row.get("sender_id"))
         platform_id = _clean_text(row.get("platform_id"))
         key = _clean_text(row.get("key"))
@@ -273,6 +278,7 @@ class HarassmentReporterPlugin(star.Star):
         for key, entry in sorted_items:
             rows.append(
                 {
+                    "__template_key": "watch_target",
                     "key": key,
                     "sender_id": _clean_text(entry.get("sender_id"), "unknown"),
                     "sender_name": _clean_text(entry.get("sender_name"), "未知用户"),
@@ -320,6 +326,27 @@ class HarassmentReporterPlugin(star.Star):
 
         if self.config.get("watchlist_snapshot") is not None:
             self.config["watchlist_snapshot"] = ""
+            self.config.save_config()
+
+    async def _ensure_watchlist_template_keys(self) -> None:
+        if self.config is None:
+            return
+
+        rows = self._get_config_watchlist_rows()
+        if not rows:
+            return
+
+        changed = False
+        normalized_rows: list[dict[str, Any]] = []
+        for row in rows:
+            item = dict(row)
+            if _clean_text(item.get("__template_key")) != "watch_target":
+                item["__template_key"] = "watch_target"
+                changed = True
+            normalized_rows.append(item)
+
+        if changed:
+            self.config["watchlist_entries"] = normalized_rows
             self.config.save_config()
 
     def _tool_response_mode(self) -> str:
