@@ -26,6 +26,8 @@ class Delivery:
     status: str
     detail: str = ""
     remaining: int = 0
+    # 实际挂上去的转发图片数。回执要照实说带了几张，不能凭「打算带几张」张口就报。
+    images_sent: int = 0
 
     @property
     def ok(self) -> bool:
@@ -102,6 +104,7 @@ class Outbox:
         target_session_id: str,
         text: str,
         image_path: str | None = None,
+        images: list[Any] | None = None,
         source_session_id: str = "",
         cooldown: int = 0,
         hourly_limit: int = 0,
@@ -112,6 +115,8 @@ class Outbox:
         Args:
             channel: 逻辑通道名（harassment / feedback / notice / feedback_reply），
                 冷却与限流按通道独立计数。
+            image_path: 聊天记录卡片的本地文件路径。
+            images: 要一起带过去的原图（images.ImageRef），比如群友说「把这张图给狐狸」。
             source_session_id: 触发来源会话，冷却按它计数；留空则按目标会话计数。
             ignore_limits: 管理员手动测试时跳过冷却与限流。
         """
@@ -134,7 +139,8 @@ class Outbox:
         cooldown_key = clean_text(source_session_id) or target
 
         # 文本才是主角 —— 那是模型自己写的那句话；卡片只是跟在后面的一张截图。
-        # 所以两者都发，顺序也保持「先说话、再上图」。
+        # 所以顺序固定为「先说话，再放聊天记录卡片，最后才是群友要转的原图」，
+        # 主人打开会话时第一眼看到的永远是那句话。
         chain = MessageChain()
         if body:
             chain.message(body)
@@ -143,6 +149,7 @@ class Outbox:
                 chain.file_image(str(image_path))
             except Exception as exc:
                 logger.warning("%s 卡片附图失败，本次只发文本：%s", LOG_PREFIX, exc)
+        images_sent = sum(1 for ref in (images or []) if ref and ref.attach_to(chain))
         if not chain.chain:
             chain.message("（空消息）")
         if self.settings.force_plain_text:
@@ -164,4 +171,4 @@ class Outbox:
         await self.store.mark_cooldown(channel, cooldown_key)
         if hourly_limit > 0:
             await self.store.mark_rate(channel)
-        return Delivery(STATUS_OK, "已送达。")
+        return Delivery(STATUS_OK, "已送达。", images_sent=images_sent)

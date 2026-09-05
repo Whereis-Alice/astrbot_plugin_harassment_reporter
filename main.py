@@ -40,7 +40,7 @@ LOG_PREFIX = "[HarassmentReporter]"
 REPO_URL = "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter"
 
 
-def _plugin_version(fallback: str = "2.1.3") -> str:
+def _plugin_version(fallback: str = "2.2.0") -> str:
     """版本号以 metadata.yaml 为准，代码这边只兜底。
 
     AstrBot 认的是 metadata.yaml；而 @star.register、/hr_status、/hr_help 和启动日志
@@ -270,10 +270,15 @@ class HarassmentReporterPlugin(star.Star):
         *,
         event: AstrMessageEvent,
         message: str,
+        send_images: bool = False,
     ) -> str:
         self._refresh_runtime()
         try:
-            return await self.feedback.handle_tool_call(event=event, message=message)
+            return await self.feedback.handle_tool_call(
+                event=event,
+                message=message,
+                send_images=send_images,
+            )
         except Exception as exc:
             logger.error("%s 处理反馈转达工具调用失败：%s", LOG_PREFIX, exc)
             return (
@@ -346,6 +351,15 @@ class HarassmentReporterPlugin(star.Star):
             chatlog_note = "最近的群聊记录会自动附在这句话后面，所以你不用复述聊天内容。\n"
         else:
             chatlog_note = "这次不会附带聊天记录，所以该讲清的来龙去脉都要写在这句话里。\n"
+        # 同理，转图关掉时不能让模型跟用户保证「图我带过去了」。
+        if settings.feedback_forward_images:
+            image_note = (
+                f"如果他这条消息里带了图，或者他引用了一条带图的消息，那些图会自动一起带给{receiver}，"
+                "你只要在话里提一句那是什么图就行。"
+                "他要是说「把刚才群里那张图也带上」，调用时额外把 `send_images` 设为 true。\n"
+            )
+        else:
+            image_note = "这次不会转发图片，所以图上是什么内容，得你自己用话讲清楚。\n"
         return (
             "[传话能力提示]\n"
             f"你可以调用 `relay_feedback_to_owner` 工具，直接去找{receiver}说一句话。"
@@ -359,12 +373,13 @@ class HarassmentReporterPlugin(star.Star):
             f"{proactive}"
             "\n"
             "怎么调用：\n"
-            f"工具只有一个参数 `message`，写你要对{receiver}说的那句话。"
+            f"主参数是 `message`，写你要对{receiver}说的那句话。"
             "用你自己的口吻完整地说出来，像真人帮群友传话，"
             "说清是谁、在哪儿、遇到了什么。\n"
             f"例如：「星之卡比群的群友A找你呀{receiver}，说是画图插件用不了了」。\n"
             "不要写成工单格式，不要只填关键词，也不要写成冷冰冰的第三人称报告。\n"
             f"{chatlog_note}"
+            f"{image_note}"
             "\n"
             "分寸：\n"
             "- 同一个话题不要反复追问；用户说不用了，这一轮就别再提。\n"
@@ -563,6 +578,8 @@ class HarassmentReporterPlugin(star.Star):
             + str(settings.feedback_hourly_limit) + " 次",
             "附带最近群聊记录：" + _switch(settings.feedback_attach_chatlog)
             + "（" + str(settings.feedback_chatlog_count) + " 条）",
+            "一起带上图片：" + _switch(settings.feedback_forward_images)
+            + "（最多 " + str(settings.feedback_image_limit) + " 张）",
             "正文补一行来源：" + _switch(settings.feedback_append_source),
             "联系记录：" + str(len(contacts)) + " 条（上限 "
             + str(settings.feedback_recent_max_entries) + "）",
@@ -593,7 +610,8 @@ class HarassmentReporterPlugin(star.Star):
             + " ｜ " + ("PNG 无损" if settings.card_lossless else "JPEG 高质量"),
             "显示时间 " + _yes(settings.card_show_time)
             + " ｜ 显示头像 " + _yes(settings.card_show_avatar)
-            + " ｜ 真实 QQ 头像 " + _yes(settings.card_use_real_avatar),
+            + " ｜ 真实 QQ 头像 " + _yes(settings.card_use_real_avatar)
+            + " ｜ 画出图片 " + _yes(settings.card_show_images),
             "渲染服务：" + ("暂时熔断中（会自动恢复）" if self.card.muted else "正常"),
             "",
             "— 观察名单 —",
@@ -628,7 +646,7 @@ class HarassmentReporterPlugin(star.Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("hr_feedback_test")
     async def cmd_feedback_test(self, event: AstrMessageEvent):
-        """走一遍完整的传话链路：文本 + 最近群聊记录卡片。"""
+        """走一遍完整的传话链路：文本 + 最近群聊记录卡片 + 图片转发。"""
         self._refresh_runtime()
         note = truncate(self._arg_text(event, "hr_feedback_test"), 200)
         if not self.settings.feedback_session_id:
@@ -637,6 +655,8 @@ class HarassmentReporterPlugin(star.Star):
         outcome = await self.feedback.relay(
             event=event,
             message=note or "这是一条 /hr_feedback_test 测试消息，用来确认我能不能找到你。",
+            # 测试就要走满整条链路，所以连群里刚发过的图也一起试着带上。
+            send_images=True,
             ignore_limits=True,
         )
         if outcome.ok:
@@ -646,6 +666,8 @@ class HarassmentReporterPlugin(star.Star):
                 attachment = "纯文本聊天记录（卡片没画出来）"
             else:
                 attachment = "无（没拉到群聊记录，或者没开这个开关）"
+            if outcome.images_forwarded:
+                attachment += " + " + str(outcome.images_forwarded) + " 张图"
             yield event.plain_result(
                 "测试消息已发往：\n"
                 + self.settings.feedback_session_id

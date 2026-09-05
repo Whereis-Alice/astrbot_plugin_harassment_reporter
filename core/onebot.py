@@ -36,6 +36,8 @@ class ChatLine:
     timestamp: float = 0.0
     is_self: bool = False
     avatar: str = ""
+    # 这条消息里图片的 http 地址。卡片用它画缩略图，转发时也能直接重发。
+    images: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -45,6 +47,7 @@ class ChatLine:
             "timestamp": self.timestamp,
             "is_self": self.is_self,
             "avatar": self.avatar,
+            "images": list(self.images),
         }
 
 
@@ -174,6 +177,31 @@ def segments_to_text(message: Any, *, limit: int = 200) -> str:
     return truncate(clean_text(" ".join(p for p in parts if p)), limit)
 
 
+def collect_segment_images(message: Any, *, limit: int = 4) -> list[str]:
+    """从 OneBot 消息段里挑出图片的 http 地址。
+
+    协议端在 image 段里给的 url 一般是可以直接访问的 http 地址；个别实现只填
+    file，那就看 file 是不是也是个地址。两个都不是 http（比如只给了一个本地
+    缓存文件名）就跳过 —— 我们这边拿不到那个文件。
+    """
+    if not isinstance(message, list):
+        return []
+    found: list[str] = []
+    for seg in message:
+        if not isinstance(seg, dict) or clean_text(seg.get("type")) != "image":
+            continue
+        data = seg.get("data") if isinstance(seg.get("data"), dict) else {}
+        for key in ("url", "file"):
+            value = clean_text(data.get(key))
+            if value.startswith(("http://", "https://")):
+                if value not in found:
+                    found.append(value)
+                break
+        if len(found) >= max(1, limit):
+            break
+    return found
+
+
 class OneBotBridge:
     """OneBot v11 动作的容错封装。
 
@@ -277,6 +305,7 @@ class OneBotBridge:
                     text=text or "[空消息]",
                     timestamp=timestamp or time.time(),
                     is_self=bool(mine) and sender_id == mine,
+                    images=collect_segment_images(item.get("message")),
                 )
             )
         return lines

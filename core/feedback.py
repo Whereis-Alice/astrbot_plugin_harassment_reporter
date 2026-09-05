@@ -19,6 +19,7 @@ from typing import Any
 
 from astrbot.api import logger
 
+from . import images as image_refs
 from .eventinfo import (
     group_id,
     message_text,
@@ -56,6 +57,7 @@ class RelayOutcome:
     delivery: Delivery
     chatlog_attached: bool = False   # 真的附上了那张聊天记录卡片
     chatlog_inlined: bool = False    # 卡片没画出来，改成把几句原文贴在正文后面
+    images_forwarded: int = 0        # 真的一起带过去的原图张数
 
     @property
     def ok(self) -> bool:
@@ -123,9 +125,15 @@ class FeedbackService:
         *,
         event: Any,
         message: str,
+        send_images: bool = False,
         ignore_limits: bool = False,
     ) -> RelayOutcome:
-        """把模型写好的一句话带给主人，附带最近群聊记录卡片。"""
+        """把模型写好的一句话带给主人，附带最近群聊记录卡片。
+
+        Args:
+            send_images: 是否连群里刚发过的图一起带走。用户自己这条消息里的图、
+                以及他引用的那条消息里的图，不看这个开关，一律自动带上。
+        """
         settings = self.settings
         if not settings.enabled or not settings.feedback_enabled:
             return RelayOutcome(Delivery(STATUS_DISABLED, "反馈转达功能当前没有开启。"))
@@ -162,6 +170,8 @@ class FeedbackService:
         else:
             group_name = await self.chatlog.group_name(event)
 
+        pictures = self._pick_images(event, chatlog, send_images=send_images)
+
         text = body
         if settings.feedback_append_source:
             text = body + "\n\n" + self._footnote(event, group_name)
@@ -187,6 +197,7 @@ class FeedbackService:
             target_session_id=settings.feedback_session_id,
             text=text,
             image_path=image_path,
+            images=pictures,
             source_session_id=session_id(event),
             cooldown=settings.feedback_cooldown_seconds,
             hourly_limit=settings.feedback_hourly_limit,
@@ -196,6 +207,7 @@ class FeedbackService:
             delivery,
             chatlog_attached=bool(image_path),
             chatlog_inlined=inlined,
+            images_forwarded=delivery.images_sent,
         )
         if not delivery.ok:
             return outcome
@@ -216,19 +228,39 @@ class FeedbackService:
             settings.feedback_recent_max_entries,
         )
         logger.info(
-            "%s 已替 %s 找过 %s | 来源=%s 记录=%s",
+            "%s 已替 %s 找过 %s | 来源=%s 记录=%s 图片=%d",
             LOG_PREFIX,
             sender_name(event),
             settings.receiver_name,
             session_id(event),
             "无" if chatlog is None else chatlog.source,
+            delivery.images_sent,
         )
         return outcome
+
+    def _pick_images(self, event: Any, chatlog: Any, *, send_images: bool) -> list[Any]:
+        """挑出这次要一起带给主人的图。
+
+        群友说「爱丽丝，把这张图给狐狸」的时候，图才是他真正想传的东西，
+        光把文字带过去等于什么都没带到。取图分两个档：
+
+        - 他自己这条消息里的图、他引用的那条消息里的图：意图明摆着，默认就带；
+        - 群里刚刚刷过去的图：只在模型明确要求时才翻。群聊里表情包太多，
+          默认去翻历史的话，每次传话都会附上一堆无关的图。
+        """
+        settings = self.settings
+        if not settings.feedback_forward_images:
+            return []
+        limit = settings.feedback_image_limit
+        picked = image_refs.from_event(event, limit=limit) + image_refs.from_reply(event, limit=limit)
+        if send_images and chatlog is not None:
+            picked += image_refs.from_urls(chatlog.recent_images(limit=limit), limit=limit)
+        return image_refs.dedupe(picked, limit=limit)
 
     # ------------------------------------------------------------------
     # 工具编排
     # ------------------------------------------------------------------
-    async def handle_tool_call(self, *, event: Any, message: str) -> str:
+    async def handle_tool_call(self, *, event: Any, message: str, send_images: bool = False) -> str:
         """工具的返回文本。
 
         这段话只有模型看得到，用来告诉它「话到底送出去了没有」。
@@ -256,7 +288,7 @@ class FeedbackService:
                     "不要提到工具调用，也不要假装已经转达。"
                 )
 
-        outcome = await self.relay(event=event, message=message)
+        outcome = await self.relay(event=event, message=message, send_images=send_images)
         delivery = outcome.delivery
 
         if delivery.ok:
@@ -268,6 +300,12 @@ class FeedbackService:
                 attachment = "，最近几句聊天记录也跟在后面了"
             else:
                 attachment = ""
+            # 图同样只能照实说。挂载可能失败（地址过期、协议端拒收），
+            # 这里报的是真正挂上去的张数。
+            if outcome.images_forwarded == 1:
+                attachment += "，那张图也带过去了"
+            elif outcome.images_forwarded > 1:
+                attachment += "，那 " + str(outcome.images_forwarded) + " 张图也一并带过去了"
             return (
                 "话已经带到" + receiver + "那边了" + attachment + "。"
                 "请用你自己的口吻自然地告诉用户你已经帮他去说了，让他等" + receiver + "有空再回。"

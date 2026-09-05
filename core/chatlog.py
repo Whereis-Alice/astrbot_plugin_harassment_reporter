@@ -17,9 +17,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import images as image_refs
 from .eventinfo import group_id, message_text, platform_id, self_id, sender_id, sender_name
 from .onebot import ChatLine, get_client, is_onebot_event, qq_group_avatar, qq_user_avatar
-from .text import clean_text, relative_time, truncate
+from .text import clean_text, relative_time, strip_placeholders, truncate
 
 LOG_PREFIX = "[HarassmentReporter]"
 
@@ -31,11 +32,26 @@ LINE_TEXT_LIMIT = 220
 # 又保证进程长期运行时缓存不会无上限地涨。
 GROUP_NAME_CACHE_LIMIT = 512
 
+# 单条发言在卡片上最多画几张缩略图。一次发九张图的人是有的，但卡片上画满
+# 九张只会把别人的发言挤出屏幕，四张已经够看清「他发的是什么」。
+IMAGE_PER_LINE = 4
+
 SOURCE_GROUP = "group_history"
 SOURCE_PRIVATE = "private_history"
 SOURCE_CONTEXT = "conversation"
 SOURCE_CURRENT = "current_only"
 SOURCE_EMPTY = "empty"
+
+
+def _dedupe_key(text: str) -> str:
+    """把一句话收敛成一个用来查重的指纹。
+
+    同一条消息从两个地方过来，写法可能不完全一样：群历史接口给的是
+    「把这张图给狐狸 [图片]」，而事件的纯文本只有「把这张图给狐狸」。
+    直接比字符串会认成两句话，卡片上就出现两条一模一样的气泡。
+    去掉占位符和空白再比，这种情况就对上了。
+    """
+    return strip_placeholders(clean_text(text)).replace(" ", "").replace("\u3000", "")
 
 
 @dataclass
@@ -70,6 +86,21 @@ class ChatLog:
         return "\n".join(
             f"{truncate(line.sender_name, 12)}：{truncate(line.text, line_limit)}" for line in picked
         )
+
+    def recent_images(self, *, limit: int) -> list[str]:
+        """这段记录里出现过的图片地址，越新的越靠前。
+
+        「爱丽丝，把刚才群里那张图发给狐狸」指的往往不是用户自己发的图，
+        而是楼上某个人发的。所以按时间倒着找，先拿最近的。
+        """
+        found: list[str] = []
+        for line in reversed(self.lines):
+            for url in line.images:
+                if url and url not in found:
+                    found.append(url)
+                    if len(found) >= max(1, limit):
+                        return found
+        return found
 
 
 class ChatLogCollector:
@@ -203,24 +234,36 @@ class ChatLogCollector:
     def _append_current(event: Any, log: ChatLog) -> None:
         """把用户此刻这句话补进去。
 
-        群历史接口通常已经包含它了，所以先查重；同一个人说了同样的话就不重复添加。
+        群历史接口通常已经包含它了，所以先查重：查到了就只把图片地址补上去
+        （事件里的图片地址比历史接口给的更新，不容易过期），没查到才新增一条。
         """
+        images = [ref.url for ref in image_refs.from_event(event, limit=IMAGE_PER_LINE) if ref.url]
         current = clean_text(message_text(event))
-        if not current:
+        if not current and not images:
             return
+
         who = sender_id(event)
+        key = _dedupe_key(current)
         for line in log.lines[-3:]:
-            if clean_text(line.text) == truncate(current, LINE_TEXT_LIMIT) or (
-                line.sender_id == who and clean_text(line.text) == current
-            ):
+            if _dedupe_key(line.text) != key:
+                continue
+            # 纯图片消息的指纹是空串，光凭这个判重会把两个人的图认成一张，
+            # 所以这种情况还要发言人也对得上。
+            if key or line.sender_id == who:
+                for url in images:
+                    if url not in line.images:
+                        line.images.append(url)
                 return
+
         log.lines.append(
             ChatLine(
                 sender_name=sender_name(event),
                 sender_id=who,
-                text=truncate(current, LINE_TEXT_LIMIT),
+                # 纯图片消息在事件里没有文字，补个占位符，跟群历史接口的写法保持一致。
+                text=truncate(current, LINE_TEXT_LIMIT) or "[图片]",
                 timestamp=time.time(),
                 is_self=False,
+                images=images,
             )
         )
         if log.source == SOURCE_EMPTY:

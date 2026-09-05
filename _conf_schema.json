@@ -288,6 +288,23 @@
           "feedback_attach_chatlog": true
         }
       },
+      "feedback_forward_images": {
+        "type": "bool",
+        "description": "把群友要给你的图一起带过来",
+        "default": true,
+        "hint": "有人说“把这张图给主人看看”时，Bot 会把那张图一起带过来，而不是只带一句“他发了张图”。他自己这条消息里的图、以及他引用的那条消息里的图都算；群里刷过去的旧图不会乱翻，只有他明确说“把刚才那张图也带上”时才去找"
+      },
+      "feedback_image_limit": {
+        "type": "int",
+        "description": "一次最多带几张图",
+        "default": 3,
+        "min": 1,
+        "max": 9,
+        "hint": "防止有人一次甩九张图把你的聊天窗口刷满",
+        "condition": {
+          "feedback_forward_images": true
+        }
+      },
       "feedback_append_source": {
         "type": "bool",
         "description": "在正文末尾补一行来源",
@@ -500,6 +517,15 @@
         "description": "显示头像",
         "default": true,
         "hint": "关掉之后卡片更紧凑，只剩昵称和气泡",
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_show_images": {
+        "type": "bool",
+        "description": "在卡片里画出群友发的图",
+        "default": true,
+        "hint": "开启后，群聊记录里的图片会直接画成缩略图，而不是只留一个 [图片] 占位符，看起来更像一张真的聊天截图。图片由渲染服务去 QQ 的图床拉取，拉不到的会自动省掉",
         "condition": {
           "enable_card_report": true
         }

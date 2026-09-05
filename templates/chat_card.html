@@ -163,6 +163,28 @@
     background: var(--mine); color: var(--mine-text);
   }
 
+  /* 群友发的图直接画进气泡，跟真的聊天截图一样：
+     多张图横着铺开、每张限死尺寸，免得三张图就把整张卡片拉长一倍。
+     拉不到的图自己隐藏；一条消息只有图、又全都拉不到时，整行会被收走。 */
+  .bubble .shots {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-top: 7px;
+  }
+  .bubble .shot {
+    display: block;
+    max-width: 190px; max-height: 170px;
+    border-radius: 8px;
+  }
+  /* 一条消息里发了好几张时，改成等高的小方块横排一行：
+     版式整齐，也不会让一条消息把卡片拉长半屏。想看清楚的那张原图会另外发过来。 */
+  .bubble .shots.many .shot {
+    width: 118px; height: 118px;
+    object-fit: cover;
+  }
+  /* 只有图没有话的气泡，边距收紧一点，别让图片浮在一大圈留白里。 */
+  .bubble.shots-only { padding: 5px; }
+  .bubble.shots-only .shots { margin-top: 0; }
+
   .empty {
     margin: 4px 0 14px;
     padding: 20px; border-radius: 12px; font-size: 13px;
@@ -179,6 +201,18 @@
   .footer .wrap { display: flex; align-items: center; gap: 10px; }
   .footer .spacer { margin-left: auto; }
 </style>
+<script>
+  /* 图片拉不到时 onerror 已经把它隐藏了。这里再补一步：如果这条消息本来只有图
+     没有话，且所有图都没拉到，那留下的就是一个空气泡 —— 干脆把整行收走。 */
+  function hrShotFailed(img) {
+    img.setAttribute("data-dead", "1");
+    var bubble = img.closest(".bubble");
+    if (!bubble || !bubble.classList.contains("shots-only")) return;
+    if (bubble.querySelectorAll(".shot:not([data-dead])").length) return;
+    var row = img.closest(".row");
+    if (row) row.style.display = "none";
+  }
+</script>
 </head>
 <body class="theme-{{ theme }}">
   <div class="bar">
@@ -201,7 +235,7 @@
         {% if show_avatar %}<div class="face" style="background: {{ msg.color }}">{{ msg.initial }}{% if msg.avatar %}<img src="{{ msg.avatar }}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" />{% endif %}</div>{% endif %}
         <div class="stack">
           <div class="who"><b>{{ msg.name }}</b>{% if msg.time %}<span>{{ msg.time }}</span>{% endif %}</div>
-          <div class="bubble">{{ msg.text }}</div>
+          <div class="bubble{% if not msg.text %} shots-only{% endif %}">{{ msg.text }}{% if msg.images %}<div class="shots{% if msg.images|length > 1 %} many{% endif %}">{% for shot in msg.images %}<img class="shot" src="{{ shot }}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none';hrShotFailed(this)" />{% endfor %}</div>{% endif %}</div>
         </div>
       </div>
       {% endfor %}

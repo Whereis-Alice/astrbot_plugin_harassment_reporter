@@ -57,6 +57,8 @@ KEY_GROUPS: dict[str, str] = {
     "feedback_hourly_limit": "feedback",
     "feedback_attach_chatlog": "feedback",
     "feedback_chatlog_count": "feedback",
+    "feedback_forward_images": "feedback",
+    "feedback_image_limit": "feedback",
     "feedback_append_source": "feedback",
     "feedback_reply_persona_rewrite": "feedback",
     "feedback_recent_max_entries": "feedback",
@@ -84,6 +86,7 @@ KEY_GROUPS: dict[str, str] = {
     "card_use_real_avatar": "card",
     "card_show_time": "card",
     "card_show_avatar": "card",
+    "card_show_images": "card",
     # 高级与调试
     "inject_usage_prompt": "advanced",
     "max_excerpt_length": "advanced",
@@ -171,8 +174,9 @@ class Settings:
         AstrBot 在实例化插件之前就会按 _conf_schema.json 补齐缺失的键，
         所以进到这里时分组子字典一定已经存在、且装的是默认值；
         旧的平铺键则因为 schema 里保留了隐藏存根而原封不动地留着。
-        因此「旧值和分组里的默认值不一样」就等价于「用户改过这一项」，
-        直接拷进分组即可。旧键一律不删，天然成为一份回退备份。
+        因此「旧值非空、且和分组里的现值不一样」就等价于「用户在旧版本改过这一项」，
+        直接拷进分组即可。空的旧键一概跳过，免得反过来把分组里已有的配置冲成空。
+        旧键一律不删，天然成为一份回退备份。
         """
         cfg = self._config
         if cfg is None:
@@ -188,7 +192,11 @@ class Settings:
             if key not in cfg:
                 continue
             legacy = cfg.get(key)
-            if legacy is None or bucket[key] == legacy:
+            if legacy is None or (isinstance(legacy, (str, list, dict)) and not legacy):
+                # 旧键是空的，说明用户在旧版本里也没填过。此时分组里的现值更可信，
+                # 不能拿一个空值把它冲掉（数字 0 和布尔 False 是合法取值，不算空）。
+                continue
+            if bucket[key] == legacy:
                 continue
             bucket[key] = legacy
             moved += 1
@@ -383,6 +391,15 @@ class Settings:
         return self._int("feedback_chatlog_count", 14, 1, 60)
 
     @property
+    def feedback_forward_images(self) -> bool:
+        """传话时把群友要给的图一起带过去。"""
+        return self._bool("feedback_forward_images", True)
+
+    @property
+    def feedback_image_limit(self) -> int:
+        return self._int("feedback_image_limit", 3, 1, 9)
+
+    @property
     def feedback_append_source(self) -> bool:
         """在正文末尾补一行「谁 · 在哪儿」，方便主人定位。"""
         return self._bool("feedback_append_source", True)
@@ -504,3 +521,8 @@ class Settings:
     def card_show_avatar(self) -> bool:
         """显示圆形头像，关掉会更紧凑。"""
         return self._bool("card_show_avatar", True)
+
+    @property
+    def card_show_images(self) -> bool:
+        """把群友发的图画进气泡里，而不是只留一个 [图片] 占位符。"""
+        return self._bool("card_show_images", True)

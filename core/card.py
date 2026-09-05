@@ -15,7 +15,7 @@ from typing import Any
 
 from astrbot.api import logger
 
-from .text import PLUGIN_DISPLAY_NAME, clean_text, format_ts, now_text, truncate
+from .text import PLUGIN_DISPLAY_NAME, clean_text, format_ts, now_text, strip_placeholders, truncate
 
 LOG_PREFIX = "[HarassmentReporter]"
 TEMPLATE_FILE = Path(__file__).resolve().parent.parent / "templates" / "chat_card.html"
@@ -29,6 +29,10 @@ PAGE_WIDTH = 720
 # 连续失败时先熄火一段时间，避免每次上报都白等一轮超时。
 FAILURE_THRESHOLD = 3
 COOLDOWN_AFTER_FAILURE = 600
+
+# 单个气泡里最多画几张缩略图。群友一次甩九张图的场面是有的，但卡片上画满九张
+# 会把上下文全挤出去；三张足够看出「他发的是什么」，剩下的还有文字占位符提示。
+SHOTS_PER_BUBBLE = 3
 
 # 头像兜底底色。拿不到真实 QQ 头像时（其它平台、非数字 ID、图片加载失败）
 # 就画一个彩色首字块；同一个人每次都是同一色，一眼能看出谁在说话。
@@ -60,6 +64,24 @@ def _avatar_color(seed: str) -> str:
     """
     key = clean_text(seed) or "unknown"
     return AVATAR_COLORS[zlib.crc32(key.encode("utf-8")) % len(AVATAR_COLORS)]
+
+
+def _shots(value: Any) -> list[str]:
+    """挑出能直接放进 <img src> 的图片地址。
+
+    只要 http 地址：卡片是丢给远端浏览器渲染的，本地路径和 base64 到了那边
+    加载不出来，反而会在卡片上留一块空白。
+    """
+    if not isinstance(value, (list, tuple)):
+        return []
+    picked: list[str] = []
+    for item in value:
+        url = clean_text(item)
+        if url.startswith(("http://", "https://")) and url not in picked:
+            picked.append(url)
+            if len(picked) >= SHOTS_PER_BUBBLE:
+                break
+    return picked
 
 
 def _initial(name: str) -> str:
@@ -155,18 +177,25 @@ class CardRenderer:
         *,
         limit: int,
         text_limit: int = 320,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """把标准化聊天行（ChatLine.as_dict()）转成卡片气泡数据。
 
         Bot 自己说的话靠右显示，其余靠左，和常见聊天软件一致。
         """
         show_time = self._settings.card_show_time
-        messages: list[dict[str, str]] = []
+        show_shots = bool(self._settings.card_show_images)
+        messages: list[dict[str, Any]] = []
         for line in lines[-max(1, limit) :]:
             is_self = bool(line.get("is_self"))
             name = _plain(line.get("sender_name") or line.get("name") or "未知用户", 24)
             seed = clean_text(line.get("sender_id")) or name
             stamp = line.get("timestamp")
+            shots = _shots(line.get("images")) if show_shots else []
+            text = _plain(line.get("text"), text_limit)
+            # 图片画出来了，就不用再留一句「[图片]」了；文字被占位符占满的气泡
+            # 直接留空，只显示缩略图，看起来才像真的聊天截图。
+            if shots and not strip_placeholders(text).strip():
+                text = ""
             messages.append(
                 {
                     "side": "right" if is_self else "left",
@@ -174,8 +203,9 @@ class CardRenderer:
                     "initial": _initial(name),
                     "color": _avatar_color(seed),
                     "time": (format_ts(stamp, "%H:%M") if (show_time and stamp) else ""),
-                    "text": _plain(line.get("text"), text_limit) or "[空消息]",
+                    "text": text or ("" if shots else "[空消息]"),
                     "avatar": clean_text(line.get("avatar")),
+                    "images": shots,
                 }
             )
         return messages

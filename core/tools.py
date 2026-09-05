@@ -87,7 +87,8 @@ class FeedbackRelayTool(FunctionTool[AstrAgentContext]):
         "答非所问，并且他愿意让你把这件事告诉主人。"
         "调用时把要对主人说的话完整写进 message，用你自己的口吻写，"
         "就像你亲自去找他说话一样，说清楚是谁在哪里、遇到了什么。"
-        "最近的群聊记录会自动附上，你不用复述聊天内容。"
+        "最近的群聊记录会自动附上，你不用复述聊天内容；"
+        "用户这条消息里带的图、以及他引用的那条消息里的图，也会自动一起带过去。"
         "带话前请先确认用户愿意，不要背着用户上报闲聊。"
     )
     parameters: dict = Field(
@@ -100,6 +101,14 @@ class FeedbackRelayTool(FunctionTool[AstrAgentContext]):
                         "你要对主人说的完整一句话，用你自己的口吻写，"
                         "例如「群里有人找你呀，说是画图插件坏了」。"
                         "不要写成工单或模板，也不要只写一个关键词。"
+                    ),
+                },
+                "send_images": {
+                    "type": "boolean",
+                    "description": (
+                        "可选。只在用户明确要你把群里刚刚发过的图一起带走时设为 true，"
+                        "例如「把楼上那张图发给主人」。"
+                        "他自己这条消息里的图和他引用的图本来就会自动带上，不用为此设这个参数。"
                     ),
                 },
             },
@@ -121,4 +130,5 @@ class FeedbackRelayTool(FunctionTool[AstrAgentContext]):
         return await self.plugin.handle_tool_feedback(
             event=event,
             message=clean_text(kwargs.get("message")),
+            send_images=bool(kwargs.get("send_images")),
         )
