@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 import zlib
 from pathlib import Path
@@ -18,6 +19,11 @@ from .text import PLUGIN_DISPLAY_NAME, clean_text, format_ts, now_text, truncate
 
 LOG_PREFIX = "[HarassmentReporter]"
 TEMPLATE_FILE = Path(__file__).resolve().parent.parent / "templates" / "chat_card.html"
+
+# 卡片的版式宽度（逻辑像素）。它只决定「一行能放多少字」，不决定图片有多大 ——
+# 真正的出图宽度是 PAGE_WIDTH × 清晰度倍数（倍数由用户在配置里选）。
+# 720 取的是手机聊天截图的观感：气泡不会宽得像一整段文章，读起来最像真的聊天记录。
+PAGE_WIDTH = 720
 
 # 卡片渲染依赖 AstrBot 的文转图服务（要起浏览器、可能走网络）。
 # 连续失败时先熄火一段时间，避免每次上报都白等一轮超时。
@@ -62,6 +68,51 @@ def _initial(name: str) -> str:
         if char.strip():
             return char.upper()
     return "?"
+
+
+def _sniff_image(file: Path) -> str | None:
+    """读文件头认一下真实格式：返回 "png" / "jpeg" / "other"，不是图片就返回 None。
+
+    AstrBot 下载渲染结果时不检查响应状态码，也一律用 .jpg 命名保存 ——
+    渲染服务返回一段错误信息时，我们手上会是一个「看着像图片」的文件。
+    与其把乱码当图片发给主人，不如在这里认出来，当成渲染失败退回纯文本。
+    """
+    try:
+        with file.open("rb") as handle:
+            head = handle.read(16)
+    except OSError:
+        return None
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return "jpeg"
+    if head.startswith((b"GIF8", b"BM")):
+        return "other"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "other"
+    return None
+
+
+def _checked_image_path(path: str) -> str | None:
+    """确认渲染结果确实是张图片，并把 PNG 的后缀改回 .png。
+
+    临时文件一律叫 .jpg，PNG 会名不副实；个别客户端按后缀猜类型时会出岔子。
+    改名失败不算问题，继续用原路径发送即可。
+    """
+    if not path:
+        return None
+    file = Path(path)
+    kind = _sniff_image(file)
+    if kind is None:
+        return None
+    if kind == "png" and file.suffix.lower() != ".png":
+        target = file.with_suffix(".png")
+        try:
+            os.replace(file, target)
+            file = target
+        except OSError:
+            pass
+    return str(file)
 
 
 class CardRenderer:
@@ -132,6 +183,56 @@ class CardRenderer:
     # ------------------------------------------------------------------
     # 渲染
     # ------------------------------------------------------------------
+    def _screenshot_options(self, *, lossless: bool) -> dict[str, Any]:
+        """截图参数。PNG 不能带 quality —— 带了远端浏览器会直接报错。"""
+        if lossless:
+            return {"full_page": True, "type": "png"}
+        return {"full_page": True, "type": "jpeg", "quality": 95}
+
+    async def _shoot(self, data: dict[str, Any]) -> str:
+        """去文转图服务截一张图，返回本地临时文件路径。
+
+        整页截图会把横向溢出一起拍下来，所以模板里的 min-width 才是出图宽度的
+        真正来源，和渲染服务的视口宽度无关。
+        无损模式万一被渲染服务拒绝，自动用高质量 JPEG 再试一次。
+        """
+        lossless = bool(self._settings.card_lossless)
+        try:
+            return await self._star.html_render(
+                self._load_template(),
+                data,
+                return_url=False,
+                options=self._screenshot_options(lossless=lossless),
+            )
+        except Exception as exc:
+            if not lossless:
+                raise
+            logger.debug("%s PNG 卡片渲染失败，改用 JPEG 再试一次：%s", LOG_PREFIX, exc)
+            return await self._star.html_render(
+                self._load_template(),
+                data,
+                return_url=False,
+                options=self._screenshot_options(lossless=False),
+            )
+
+    def _note_failure(self, reason: str) -> None:
+        """记一次渲染失败；连续失败到阈值就熄火一段时间，别每次上报都白等超时。"""
+        self._failures += 1
+        logger.warning(
+            "%s 卡片%s（第 %s 次），本次改用纯文本。",
+            LOG_PREFIX,
+            reason,
+            self._failures,
+        )
+        if self._failures >= FAILURE_THRESHOLD:
+            self._muted_until = time.time() + COOLDOWN_AFTER_FAILURE
+            self._failures = 0
+            logger.warning(
+                "%s 卡片渲染连续失败，暂停 %s 秒后再尝试。",
+                LOG_PREFIX,
+                COOLDOWN_AFTER_FAILURE,
+            )
+
     async def render(
         self,
         *,
@@ -164,37 +265,22 @@ class CardRenderer:
             "generated_at": now_text(),
             "empty_hint": _plain(empty_hint, 60),
             "show_avatar": bool(self._settings.card_show_avatar),
+            # 版式宽度 + 清晰度倍数：模板用它们算出图有多大，见模板顶部注释。
+            "page_width": PAGE_WIDTH,
+            "scale": str(self._settings.card_scale),
         }
 
         try:
-            path = await self._star.html_render(
-                self._load_template(),
-                data,
-                return_url=False,
-                options={"full_page": True, "type": "jpeg", "quality": 92},
-            )
+            raw = await self._shoot(data)
         except Exception as exc:
-            self._failures += 1
-            logger.warning(
-                "%s 卡片渲染失败（第 %s 次），本次改用纯文本：%s",
-                LOG_PREFIX,
-                self._failures,
-                exc,
-            )
-            if self._failures >= FAILURE_THRESHOLD:
-                self._muted_until = time.time() + COOLDOWN_AFTER_FAILURE
-                self._failures = 0
-                logger.warning(
-                    "%s 卡片渲染连续失败，暂停 %s 秒后再尝试。",
-                    LOG_PREFIX,
-                    COOLDOWN_AFTER_FAILURE,
-                )
+            self._note_failure(f"渲染失败：{exc}")
             return None
 
-        self._failures = 0
-        path = clean_text(path)
-        if not path or not Path(path).exists():
+        path = _checked_image_path(clean_text(raw))
+        if path is None:
+            self._note_failure("渲染服务没有返回有效图片")
             return None
+        self._failures = 0
         return path
 
     # ------------------------------------------------------------------

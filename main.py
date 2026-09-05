@@ -19,7 +19,7 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.core.agent.message import TextPart
 from astrbot.core.star.filter.custom_filter import CustomFilter
 
-from .core.card import CardRenderer
+from .core.card import PAGE_WIDTH, CardRenderer
 from .core.chatlog import ChatLogCollector
 from .core.config import Settings
 from .core.eventinfo import origin_label, session_id
@@ -558,6 +558,9 @@ class HarassmentReporterPlugin(star.Star):
             "适用：骚扰 " + _yes(settings.card_for_harassment)
             + " ｜ 反馈 " + _yes(settings.card_for_feedback)
             + " ｜ 群事件 " + _yes(settings.card_for_notice),
+            "清晰度：" + str(settings.card_scale) + " 倍（约 "
+            + str(PAGE_WIDTH * settings.card_scale) + " 像素宽）"
+            + " ｜ " + ("PNG 无损" if settings.card_lossless else "JPEG 高质量"),
             "显示时间 " + _yes(settings.card_show_time)
             + " ｜ 显示头像 " + _yes(settings.card_show_avatar)
             + " ｜ 真实 QQ 头像 " + _yes(settings.card_use_real_avatar),

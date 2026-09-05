@@ -13,6 +13,10 @@ TOOL_RESPONSE_MODES = {
 }
 OWNER_REPORT_STYLES = {"structured", "persona_natural"}
 CARD_THEMES = {"aurora", "midnight", "paper"}
+CARD_SHARPNESS = {"standard", "high", "ultra"}
+# 清晰度档位 -> 整页放大倍数。出图宽度 = 卡片版式宽度（720）× 倍数，
+# 也就是 1440 / 2160 / 2880 像素宽。版式和字号不变，只是像素更密。
+SHARPNESS_SCALE = {"standard": 2, "high": 3, "ultra": 4}
 SEVERITIES = {"low", "medium", "high"}
 
 CONFIG_LAYOUT_VERSION = "2"
@@ -74,6 +78,8 @@ KEY_GROUPS: dict[str, str] = {
     "card_for_feedback": "card",
     "card_for_notice": "card",
     "card_theme": "card",
+    "card_sharpness": "card",
+    "card_lossless": "card",
     "card_max_messages": "card",
     "card_use_real_avatar": "card",
     "card_show_time": "card",
@@ -465,6 +471,20 @@ class Settings:
     @property
     def card_theme(self) -> str:
         return self._choice("card_theme", "aurora", CARD_THEMES)
+
+    @property
+    def card_sharpness(self) -> str:
+        return self._choice("card_sharpness", "standard", CARD_SHARPNESS)
+
+    @property
+    def card_scale(self) -> int:
+        """卡片放大倍数。版式一模一样，只是像素翻倍，字看起来更实、更耐放大。"""
+        return SHARPNESS_SCALE.get(self.card_sharpness, 2)
+
+    @property
+    def card_lossless(self) -> bool:
+        """用 PNG 出图，文字边缘没有 JPEG 的糊边，代价是文件更大一些。"""
+        return self._bool("card_lossless", True)
 
     @property
     def card_max_messages(self) -> int:

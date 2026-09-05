@@ -2,7 +2,7 @@ name: astrbot_plugin_harassment_reporter
 display_name: 我会打小报告
 desc: 让 Bot 学会主动来找你 —— 帮群友传话、被骚扰时告状、被禁言被踢时汇报，并附上一张最近群聊记录卡片
 short_desc: 让 LLM 用自己的口吻主动找主人：传话 + 骚扰上报 + 群事件小报告
-version: 2.1.1
+version: 2.1.2
 author: Huli3
 repo: https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter
 astrbot_version: ">=4.16,<5"

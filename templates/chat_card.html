@@ -3,13 +3,23 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  /* 这张卡片要像一张真实的聊天截图：整幅铺满，不留多余背景色块。 */
+  /* 这张卡片要像一张真实的聊天截图：整幅铺满，不留多余背景色块。
+
+     出图尺寸 = page_width × scale：
+       page_width 是版式宽度（逻辑像素），决定「一行能放多少字」；
+       scale 是清晰度倍数，用 CSS zoom 把整页等比放大，只增加像素、不改版式。
+     文转图服务的视口宽度我们控制不了（常见 800 / 1280），但整页截图会连
+     横向溢出一起拍下来 —— 只要 page_width × scale 大于视口宽度，出图宽度
+     就恒等于 page_width × scale，同一份配置在任何服务上都得到同样的卡片。 */
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; }
+  html { zoom: {{ scale }}; }
+  html, body { width: 100%; min-width: {{ page_width }}px; }
   body {
-    min-height: 100vh;
-    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB",
+                 "Noto Sans CJK SC", "Source Han Sans SC", "WenQuanYi Micro Hei",
+                 "Noto Sans", "DejaVu Sans", sans-serif;
     -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
     background: var(--page);
     color: var(--bubble-text);
   }
@@ -67,10 +77,10 @@
     --shadow: rgba(80, 60, 30, 0.08);
   }
 
-  /* 顶栏和页脚整幅横贯，里面的内容居中收窄。
-     渲染服务的画布宽度不可控（常见 800 / 1280），收窄之后宽画布上也不会
-     出现「气泡挤在左边、右边一大片空」的观感。 */
-  .wrap { width: 100%; max-width: 880px; margin: 0 auto; }
+  /* 内容列的宽度就是版式宽度：正常情况下卡片整幅铺满，一点多余背景都不留。
+     万一某个渲染服务的视口比 page_width × scale 还宽，这里的 max-width 会把
+     内容居中，不至于全挤在左边。 */
+  .wrap { width: 100%; max-width: {{ page_width }}px; margin: 0 auto; }
 
   /* ---------- 顶栏：像聊天窗口的标题栏 ---------- */
   .bar {

@@ -439,6 +439,34 @@
           "enable_card_report": true
         }
       },
+      "card_sharpness": {
+        "type": "string",
+        "description": "卡片清晰度",
+        "default": "standard",
+        "options": [
+          "standard",
+          "high",
+          "ultra"
+        ],
+        "labels": [
+          "标准 · 2 倍（约 1440 像素宽，推荐）",
+          "高清 · 3 倍（约 2160 像素宽）",
+          "超清 · 4 倍（约 2880 像素宽，文件最大）"
+        ],
+        "hint": "把整张卡片等比放大后再截图：字号和版式看起来完全一样，但像素更多，点开放大不发虚。倍数越高图片越大、渲染越慢",
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_lossless": {
+        "type": "bool",
+        "description": "无损画质（PNG）",
+        "default": true,
+        "hint": "用 PNG 出图，笔画边缘干净利落；关掉则用高质量 JPEG，文件更小但文字周围会有一点糊边。渲染服务不支持 PNG 时会自动退回 JPEG",
+        "condition": {
+          "enable_card_report": true
+        }
+      },
       "card_max_messages": {
         "type": "int",
         "description": "卡片最多展示几条消息",
