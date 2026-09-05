@@ -60,7 +60,7 @@ class Outbox:
         """把一条消息投递到目标会话。
 
         Args:
-            channel: 逻辑通道名（harassment / feedback / notice / ticket_reply），
+            channel: 逻辑通道名（harassment / feedback / notice / feedback_reply），
                 冷却与限流按通道独立计数。
             source_session_id: 触发来源会话，冷却按它计数；留空则按目标会话计数。
             ignore_limits: 管理员手动测试时跳过冷却与限流。
@@ -95,20 +95,18 @@ class Outbox:
                     f"最近一小时已经发了 {used} 条，达到上限 {hourly_limit} 条，本次没有发送。",
                 )
 
+        # 文本才是主角 —— 那是模型自己写的那句话；卡片只是跟在后面的一张截图。
+        # 所以两者都发，顺序也保持「先说话、再上图」。
         chain = MessageChain()
-        has_image = False
+        if body:
+            chain.message(body)
         if image_path:
             try:
                 chain.file_image(str(image_path))
-                has_image = True
             except Exception as exc:
-                logger.warning("%s 卡片附图失败，本次改用纯文本：%s", LOG_PREFIX, exc)
-                has_image = False
-
-        if body and (not has_image or self.settings.card_keep_text):
-            chain.message(body)
+                logger.warning("%s 卡片附图失败，本次只发文本：%s", LOG_PREFIX, exc)
         if not chain.chain:
-            chain.message(body or "（空消息）")
+            chain.message("（空消息）")
         if self.settings.force_plain_text:
             # 上报里常有会话 ID、群号这类需要复制的内容，默认不走全局文转图。
             chain.use_t2i(False)

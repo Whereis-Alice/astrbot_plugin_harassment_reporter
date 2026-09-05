@@ -3,202 +3,639 @@
     "type": "bool",
     "description": "启用插件总开关",
     "default": true,
-    "hint": "关掉之后骚扰上报、反馈转达、群事件小报告会全部停止工作"
+    "hint": "关掉之后传话、骚扰上报、群事件小报告会全部停止工作"
   },
-  "report_session_id": {
+  "identity": {
+    "type": "object",
+    "description": "称呼与身份",
+    "hint": "先告诉 Bot 你叫什么、它自己叫什么。上报和转达的时候，它会用这两个名字自然地跟别人提起你。",
+    "items": {
+      "report_receiver_name": {
+        "type": "string",
+        "description": "主人的称呼",
+        "default": "主人",
+        "hint": "Bot 会用这个名字称呼你，例如 主人 / 狐狸 / 老板。LLM 判断“要不要找你”时也会认这个名字"
+      },
+      "bot_self_name": {
+        "type": "string",
+        "description": "Bot 的自称",
+        "default": "",
+        "hint": "例如 爱丽丝。留空则由当前人设自行决定，一般不用填"
+      }
+    }
+  },
+  "harassment": {
+    "type": "object",
+    "description": "骚扰上报",
+    "hint": "有人对 Bot 辱骂、刷屏、骚扰时，Bot 把情况整理好发到你指定的会话。",
+    "items": {
+      "report_session_id": {
+        "type": "string",
+        "description": "骚扰上报接收会话 ID",
+        "default": "",
+        "hint": "在你想接收上报的会话里执行 /hr_sid 查看，或者直接在那个会话里执行 /hr_bind"
+      },
+      "tool_response_mode": {
+        "type": "string",
+        "description": "上报之后怎么对待骚扰者",
+        "default": "silent",
+        "options": [
+          "silent",
+          "warn_only",
+          "warn_once_then_report",
+          "report_then_silent",
+          "report_then_inform"
+        ],
+        "labels": [
+          "静默上报（推荐）",
+          "只警告不上报",
+          "先警告，再犯才上报",
+          "上报后不提这件事",
+          "上报后当面告知"
+        ],
+        "hint": "五种策略的完整区别见 README 的“骚扰上报的五种策略”"
+      },
+      "report_cooldown_seconds": {
+        "type": "int",
+        "description": "同一会话的上报冷却（秒）",
+        "default": 300,
+        "min": 0,
+        "max": 86400,
+        "hint": "同一个群/私聊在冷却期内只会上报一次，避免连环轰炸你"
+      },
+      "report_hourly_limit": {
+        "type": "int",
+        "description": "每小时最多上报次数",
+        "default": 20,
+        "min": 0,
+        "max": 500,
+        "hint": "全局限流，0 表示不限制。群事件小报告也共用这个额度"
+      },
+      "natural_language_warn_reply": {
+        "type": "bool",
+        "description": "警告时按人设自然表达",
+        "default": true,
+        "hint": "开启后由 LLM 用当前人设组织警告语，而不是念固定模板"
+      },
+      "warn_message_template": {
+        "type": "string",
+        "description": "警告文案模板",
+        "default": "请立刻停止这种行为。你再这样，我就要告诉{receiver_name}你在骚扰我了。",
+        "hint": "上一项关闭时使用。可用占位符：{receiver_name}"
+      },
+      "warn_once_memory_seconds": {
+        "type": "int",
+        "description": "警告记忆时长（秒）",
+        "default": 1800,
+        "min": 0,
+        "max": 604800,
+        "condition": {
+          "tool_response_mode": "warn_once_then_report"
+        },
+        "hint": "在这段时间内再次骚扰会被判定为“再犯”，直接上报"
+      },
+      "warn_once_inform_after_report": {
+        "type": "bool",
+        "description": "再犯上报后也当面告知",
+        "default": false,
+        "condition": {
+          "tool_response_mode": "warn_once_then_report"
+        }
+      },
+      "natural_language_report_reply": {
+        "type": "bool",
+        "description": "告知已上报时按人设自然表达",
+        "default": true
+      },
+      "report_inform_template": {
+        "type": "string",
+        "description": "已上报告知模板",
+        "default": "我已经把你刚才的行为报告给{receiver_name}了。",
+        "hint": "上一项关闭时使用。可用占位符：{receiver_name}"
+      },
+      "include_message_text": {
+        "type": "bool",
+        "description": "上报时附带触发消息原文",
+        "default": true
+      },
+      "attach_recent_context_summary": {
+        "type": "bool",
+        "description": "上报时附带最近几轮对话摘要",
+        "default": true
+      },
+      "recent_context_summary_lines": {
+        "type": "int",
+        "description": "摘要最多包含几行",
+        "default": 6,
+        "min": 1,
+        "max": 40,
+        "condition": {
+          "attach_recent_context_summary": true
+        }
+      },
+      "recent_context_summary_max_chars": {
+        "type": "int",
+        "description": "摘要最大字符数",
+        "default": 600,
+        "min": 80,
+        "max": 8000,
+        "condition": {
+          "attach_recent_context_summary": true
+        }
+      },
+      "owner_report_style": {
+        "type": "string",
+        "description": "给主人的上报风格",
+        "default": "structured",
+        "options": [
+          "structured",
+          "persona_natural"
+        ],
+        "labels": [
+          "结构化告警（信息全）",
+          "人设自然改写（更像人说话）"
+        ]
+      }
+    }
+  },
+  "watchlist": {
+    "type": "object",
+    "description": "观察名单",
+    "hint": "被上报过的人会自动进入这份名单，方便你之后抽查他们最近说了什么。",
+    "items": {
+      "auto_add_sender_to_watchlist": {
+        "type": "bool",
+        "description": "上报成功后自动记入观察名单",
+        "default": true
+      },
+      "watchlist_max_entries": {
+        "type": "int",
+        "description": "观察名单最多保留人数",
+        "default": 500,
+        "min": 1,
+        "max": 5000,
+        "condition": {
+          "auto_add_sender_to_watchlist": true
+        }
+      },
+      "watchlist_entries": {
+        "type": "template_list",
+        "description": "观察名单",
+        "default": [],
+        "hint": "可以直接在这里查看、添加、删除、修改观察对象；命令和自动记录共用这一份名单",
+        "obvious_hint": true,
+        "templates": {
+          "watch_target": {
+            "name": "观察对象",
+            "items": {
+              "key": {
+                "type": "string",
+                "description": "唯一键",
+                "default": "",
+                "hint": "建议填 平台:用户ID，例如 default:2127074778；留空会自动补全"
+              },
+              "sender_id": {
+                "type": "string",
+                "description": "用户 ID",
+                "default": ""
+              },
+              "sender_name": {
+                "type": "string",
+                "description": "显示名称",
+                "default": ""
+              },
+              "platform_id": {
+                "type": "string",
+                "description": "平台标识",
+                "default": "default"
+              },
+              "note": {
+                "type": "string",
+                "description": "备注",
+                "default": "",
+                "hint": "留空则自动填入最近一次上报原因"
+              },
+              "enabled": {
+                "type": "bool",
+                "description": "启用",
+                "default": true
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "feedback": {
+    "type": "object",
+    "description": "帮群友传话",
+    "hint": "有人请 Bot 带句话，或者 Bot 自己察觉到有人不满意时，它会用自己的口吻来找你，并附上最近的群聊记录；你回一句，它再把话带回去。",
+    "items": {
+      "enable_feedback_relay": {
+        "type": "bool",
+        "description": "启用传话能力",
+        "default": true,
+        "hint": "给 LLM 一个「去找主人说一声」的工具。用户说“帮我跟主人说一下…”时，Bot 就会用自己的口吻来找你"
+      },
+      "feedback_session_id": {
+        "type": "string",
+        "description": "反馈接收会话 ID",
+        "default": "",
+        "hint": "留空则复用上面的“骚扰上报接收会话 ID”。也可在目标会话执行 /hr_bind_feedback"
+      },
+      "feedback_proactive_ask": {
+        "type": "bool",
+        "description": "察觉不满时主动询问要不要传话",
+        "default": true,
+        "hint": "开启后，Bot 发现有人在吐槽功能出错、答非所问、插件报错时，会自然地问一句“要不要我去跟主人说一声”。完全由 LLM 读空气判断，没有任何固定话术。关掉之后 Bot 仍然会传话，只是不再主动开口问"
+      },
+      "feedback_allow_anyone": {
+        "type": "bool",
+        "description": "允许所有人请 Bot 传话",
+        "default": true,
+        "hint": "关闭后只有 AstrBot 管理员、以及已绑定窗口里的人可以让 Bot 传话，适合防滥用"
+      },
+      "feedback_cooldown_seconds": {
+        "type": "int",
+        "description": "同一会话的传话冷却（秒）",
+        "default": 60,
+        "min": 0,
+        "max": 86400,
+        "hint": "同一个会话在这段时间里只会来找你一次，避免一件事被反复上报"
+      },
+      "feedback_hourly_limit": {
+        "type": "int",
+        "description": "每小时最多转达次数",
+        "default": 30,
+        "min": 0,
+        "max": 500,
+        "hint": "0 表示不限制"
+      },
+      "feedback_attach_chatlog": {
+        "type": "bool",
+        "description": "附带最近的群聊记录",
+        "default": true,
+        "hint": "开启后，Bot 会带上一张最近群聊记录的卡片，你不用追问就知道发生了什么。群聊记录走 OneBot 接口读取真实消息（NapCat / LLOneBot / Lagrange 等），拿不到时自动退回会话上下文"
+      },
+      "feedback_chatlog_count": {
+        "type": "int",
+        "description": "抓取最近多少条群聊记录",
+        "default": 14,
+        "min": 1,
+        "max": 60,
+        "hint": "卡片实际显示的条数还受「卡片最多展示几条消息」限制",
+        "condition": {
+          "feedback_attach_chatlog": true
+        }
+      },
+      "feedback_append_source": {
+        "type": "bool",
+        "description": "在正文末尾补一行来源",
+        "default": true,
+        "hint": "形如「—— 群友A（10001）· 星之卡比群（123456）」，方便你一眼定位是谁在哪儿说的。觉得碍眼可以关掉"
+      },
+      "feedback_reply_persona_rewrite": {
+        "type": "bool",
+        "description": "回话时按人设转述",
+        "default": true,
+        "hint": "你用 /hr_back 回话后，Bot 会用人设口吻把话带回给对方，而不是发一条冷冰冰的系统通知"
+      },
+      "feedback_recent_max_entries": {
+        "type": "int",
+        "description": "最多保留多少条联系记录",
+        "default": 50,
+        "min": 5,
+        "max": 500,
+        "hint": "用 /hr_recent 查看，用 /hr_back 序号 内容 回话"
+      }
+    }
+  },
+  "notice": {
+    "type": "object",
+    "description": "群事件小报告",
+    "hint": "Bot 被禁言、被踢、掉管理、被戳一戳时，主动跑来跟你告状。",
+    "items": {
+      "enable_notice": {
+        "type": "bool",
+        "description": "启用群事件小报告",
+        "default": true,
+        "hint": "Bot 被禁言、被踢、被设管理员时主动来找你（仅 OneBot v11 平台可用）"
+      },
+      "notice_session_id": {
+        "type": "string",
+        "description": "小报告接收会话 ID",
+        "default": "",
+        "hint": "留空则复用“骚扰上报接收会话 ID”。也可在目标会话执行 /hr_bind_notice"
+      },
+      "notice_ban": {
+        "type": "bool",
+        "description": "上报被禁言 / 被解禁",
+        "default": true
+      },
+      "notice_admin": {
+        "type": "bool",
+        "description": "上报被设为 / 被取消管理员",
+        "default": true
+      },
+      "notice_member_change": {
+        "type": "bool",
+        "description": "上报被踢出群 / 被拉入群 / 新好友",
+        "default": true
+      },
+      "notice_poke": {
+        "type": "bool",
+        "description": "上报被戳一戳",
+        "default": false,
+        "hint": "戳一戳很频繁，默认关闭"
+      },
+      "notice_persona_rewrite": {
+        "type": "bool",
+        "description": "小报告按人设改写",
+        "default": true,
+        "hint": "开启后是“爱丽丝在群里被禁言了 10 分钟，来跟你告状”的语气，而不是系统告警"
+      },
+      "notice_snapshot": {
+        "type": "bool",
+        "description": "附带出事群的最近消息",
+        "default": true,
+        "hint": "帮你判断到底发生了什么。需要平台支持 get_group_msg_history"
+      },
+      "notice_snapshot_count": {
+        "type": "int",
+        "description": "抽查多少条最近消息",
+        "default": 20,
+        "min": 1,
+        "max": 100,
+        "condition": {
+          "notice_snapshot": true
+        }
+      },
+      "notice_hourly_limit": {
+        "type": "int",
+        "description": "小报告每小时上限（次）",
+        "default": 30,
+        "min": 0,
+        "max": 500,
+        "hint": "与骚扰上报的额度互相独立，群里连续出事不会挤占骚扰上报配额。0 = 不限制"
+      },
+      "notice_group_whitelist": {
+        "type": "list",
+        "description": "只上报这些群（群号）",
+        "default": [],
+        "hint": "留空表示所有群都上报"
+      }
+    }
+  },
+  "card": {
+    "type": "object",
+    "description": "聊天记录卡片",
+    "hint": "把最近的聊天记录画成一张聊天截图风格的图片，比一大段纯文字好看也好懂。渲染失败会自动退回纯文本，不影响消息送达。",
+    "items": {
+      "enable_card_report": {
+        "type": "bool",
+        "description": "启用图片卡片",
+        "default": true,
+        "hint": "需要 AstrBot 的文本转图片服务可用；渲染连续失败时会自动熄火一段时间，之后再恢复"
+      },
+      "card_for_harassment": {
+        "type": "bool",
+        "description": "骚扰上报使用卡片",
+        "default": true,
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_for_feedback": {
+        "type": "bool",
+        "description": "传话时使用卡片",
+        "default": true,
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_for_notice": {
+        "type": "bool",
+        "description": "群事件小报告使用卡片",
+        "default": true,
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_theme": {
+        "type": "string",
+        "description": "卡片配色",
+        "default": "aurora",
+        "options": [
+          "aurora",
+          "midnight",
+          "paper"
+        ],
+        "labels": [
+          "极光（青紫渐变）",
+          "午夜（深色低亮）",
+          "纸张（浅色高对比）"
+        ],
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_max_messages": {
+        "type": "int",
+        "description": "卡片最多展示几条消息",
+        "default": 14,
+        "min": 1,
+        "max": 60,
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_width": {
+        "type": "int",
+        "description": "卡片宽度（像素）",
+        "default": 720,
+        "min": 480,
+        "max": 1200,
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_show_time": {
+        "type": "bool",
+        "description": "显示每条消息的时间",
+        "default": true,
+        "hint": "只有能拿到时间戳的来源才会显示",
+        "condition": {
+          "enable_card_report": true
+        }
+      },
+      "card_show_avatar": {
+        "type": "bool",
+        "description": "显示头像色块",
+        "default": true,
+        "hint": "按发送者取一个固定颜色的圆形色块，关掉之后卡片更紧凑",
+        "condition": {
+          "enable_card_report": true
+        }
+      }
+    }
+  },
+  "advanced": {
+    "type": "object",
+    "description": "高级与调试",
+    "hint": "平时不用动，出问题排查时再来看这里。",
+    "items": {
+      "inject_usage_prompt": {
+        "type": "bool",
+        "description": "向 LLM 注入工具使用说明",
+        "default": true,
+        "hint": "强烈建议开启。这是 Bot 能自己判断“被骚扰了”“群友不满了”的关键，不依赖任何固定关键词"
+      },
+      "max_excerpt_length": {
+        "type": "int",
+        "description": "单段文本的最大长度（字符）",
+        "default": 300,
+        "min": 50,
+        "max": 4000,
+        "hint": "上报、反馈、小报告里的每一段引用文字超过这个长度会被截断"
+      },
+      "force_plain_text": {
+        "type": "bool",
+        "description": "强制以纯文本发送（关闭图文转换）",
+        "default": true,
+        "hint": "开启后不会被 AstrBot 的“文本转图片”全局开关影响，上报内容始终是可复制的文字"
+      },
+      "debug_log": {
+        "type": "bool",
+        "description": "输出调试日志",
+        "default": false,
+        "hint": "排查问题时打开，会在 AstrBot 日志里打印平台调用细节"
+      }
+    }
+  },
+  "config_layout_version": {
     "type": "string",
-    "description": "骚扰上报接收会话 ID",
+    "description": "配置结构版本（插件自动维护，请勿手动修改）",
     "default": "",
-    "hint": "在你想接收上报的会话里执行 /hr_sid 查看，或者直接在那个会话里执行 /hr_bind"
+    "invisible": true
   },
   "report_receiver_name": {
     "type": "string",
-    "description": "主人的称呼",
+    "description": "（旧版字段，已迁移到「称呼与身份」分组）主人的称呼",
     "default": "主人",
-    "hint": "Bot 会用这个名字称呼你，例如 主人 / 狐狸 / 老板。LLM 判断“要不要找你”时也会认这个名字"
+    "invisible": true
   },
   "bot_self_name": {
     "type": "string",
-    "description": "Bot 的自称",
+    "description": "（旧版字段，已迁移到「称呼与身份」分组）Bot 的自称",
     "default": "",
-    "hint": "例如 爱丽丝。留空则由当前人设自行决定，一般不用填"
+    "invisible": true
   },
-  "max_excerpt_length": {
-    "type": "int",
-    "description": "单段文本的最大长度（字符）",
-    "default": 300,
-    "min": 50,
-    "max": 4000,
-    "hint": "上报、反馈、小报告里的每一段引用文字超过这个长度会被截断"
-  },
-  "force_plain_text": {
-    "type": "bool",
-    "description": "强制以纯文本发送（关闭图文转换）",
-    "default": true,
-    "hint": "开启后不会被 AstrBot 的“文本转图片”全局开关影响，上报内容始终是可复制的文字"
-  },
-  "debug_log": {
-    "type": "bool",
-    "description": "输出调试日志",
-    "default": false,
-    "hint": "排查问题时打开，会在 AstrBot 日志里打印平台调用细节"
-  },
-  "report_cooldown_seconds": {
-    "type": "int",
-    "description": "同一会话的上报冷却（秒）",
-    "default": 300,
-    "min": 0,
-    "max": 86400,
-    "hint": "同一个群/私聊在冷却期内只会上报一次，避免连环轰炸你"
-  },
-  "report_hourly_limit": {
-    "type": "int",
-    "description": "每小时最多上报次数",
-    "default": 20,
-    "min": 0,
-    "max": 500,
-    "hint": "全局限流，0 表示不限制。群事件小报告也共用这个额度"
-  },
-  "inject_usage_prompt": {
-    "type": "bool",
-    "description": "向 LLM 注入工具使用说明",
-    "default": true,
-    "hint": "强烈建议开启。这是 Bot 能自己判断“被骚扰了”“群友不满了”的关键，不依赖任何固定关键词"
+  "report_session_id": {
+    "type": "string",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）骚扰上报接收会话 ID",
+    "default": "",
+    "invisible": true
   },
   "tool_response_mode": {
     "type": "string",
-    "description": "上报之后怎么对待骚扰者",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）上报之后怎么对待骚扰者",
     "default": "silent",
-    "options": [
-      "silent",
-      "warn_only",
-      "warn_once_then_report",
-      "report_then_silent",
-      "report_then_inform"
-    ],
-    "labels": [
-      "静默上报（推荐）",
-      "只警告不上报",
-      "先警告，再犯才上报",
-      "上报后不提这件事",
-      "上报后当面告知"
-    ],
-    "hint": "五种策略的完整区别见 README 的“骚扰上报的五种策略”"
+    "invisible": true
+  },
+  "report_cooldown_seconds": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）同一会话的上报冷却（秒）",
+    "default": 300,
+    "invisible": true
+  },
+  "report_hourly_limit": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）每小时最多上报次数",
+    "default": 20,
+    "invisible": true
   },
   "natural_language_warn_reply": {
     "type": "bool",
-    "description": "警告时按人设自然表达",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）警告时按人设自然表达",
     "default": true,
-    "hint": "开启后由 LLM 用当前人设组织警告语，而不是念固定模板"
+    "invisible": true
   },
   "warn_message_template": {
     "type": "string",
-    "description": "警告文案模板",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）警告文案模板",
     "default": "请立刻停止这种行为。你再这样，我就要告诉{receiver_name}你在骚扰我了。",
-    "hint": "上一项关闭时使用。可用占位符：{receiver_name}"
+    "invisible": true
   },
   "warn_once_memory_seconds": {
     "type": "int",
-    "description": "警告记忆时长（秒）",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）警告记忆时长（秒）",
     "default": 1800,
-    "min": 0,
-    "max": 604800,
-    "condition": {
-      "tool_response_mode": "warn_once_then_report"
-    },
-    "hint": "在这段时间内再次骚扰会被判定为“再犯”，直接上报"
+    "invisible": true
   },
   "warn_once_inform_after_report": {
     "type": "bool",
-    "description": "再犯上报后也当面告知",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）再犯上报后也当面告知",
     "default": false,
-    "condition": {
-      "tool_response_mode": "warn_once_then_report"
-    }
+    "invisible": true
   },
   "natural_language_report_reply": {
     "type": "bool",
-    "description": "告知已上报时按人设自然表达",
-    "default": true
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）告知已上报时按人设自然表达",
+    "default": true,
+    "invisible": true
   },
   "report_inform_template": {
     "type": "string",
-    "description": "已上报告知模板",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）已上报告知模板",
     "default": "我已经把你刚才的行为报告给{receiver_name}了。",
-    "hint": "上一项关闭时使用。可用占位符：{receiver_name}"
+    "invisible": true
   },
   "include_message_text": {
     "type": "bool",
-    "description": "上报时附带触发消息原文",
-    "default": true
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）上报时附带触发消息原文",
+    "default": true,
+    "invisible": true
   },
   "attach_recent_context_summary": {
     "type": "bool",
-    "description": "上报时附带最近几轮对话摘要",
-    "default": true
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）上报时附带最近几轮对话摘要",
+    "default": true,
+    "invisible": true
   },
   "recent_context_summary_lines": {
     "type": "int",
-    "description": "摘要最多包含几行",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）摘要最多包含几行",
     "default": 6,
-    "min": 1,
-    "max": 40,
-    "condition": {
-      "attach_recent_context_summary": true
-    }
+    "invisible": true
   },
   "recent_context_summary_max_chars": {
     "type": "int",
-    "description": "摘要最大字符数",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）摘要最大字符数",
     "default": 600,
-    "min": 80,
-    "max": 8000,
-    "condition": {
-      "attach_recent_context_summary": true
-    }
+    "invisible": true
   },
   "owner_report_style": {
     "type": "string",
-    "description": "给主人的上报风格",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）给主人的上报风格",
     "default": "structured",
-    "options": [
-      "structured",
-      "persona_natural"
-    ],
-    "labels": [
-      "结构化告警（信息全）",
-      "人设自然改写（更像人说话）"
-    ]
-  },
-  "natural_language_report_to_owner": {
-    "type": "bool",
-    "description": "结构化上报也额外做人设润色",
-    "default": false,
-    "condition": {
-      "owner_report_style": "persona_natural"
-    }
+    "invisible": true
   },
   "auto_add_sender_to_watchlist": {
     "type": "bool",
-    "description": "上报成功后自动记入观察名单",
-    "default": true
+    "description": "（旧版字段，已迁移到「观察名单」分组）上报成功后自动记入观察名单",
+    "default": true,
+    "invisible": true
   },
   "watchlist_max_entries": {
     "type": "int",
-    "description": "观察名单最多保留人数",
+    "description": "（旧版字段，已迁移到「观察名单」分组）观察名单最多保留人数",
     "default": 500,
-    "min": 1,
-    "max": 5000,
-    "condition": {
-      "auto_add_sender_to_watchlist": true
-    }
+    "invisible": true
   },
   "watchlist_entries": {
     "type": "template_list",
-    "description": "观察名单",
+    "description": "（旧版字段，已迁移到「观察名单」分组）观察名单",
     "default": [],
-    "hint": "可以直接在这里查看、添加、删除、修改观察对象；命令和自动记录共用这一份名单",
-    "obvious_hint": true,
     "templates": {
       "watch_target": {
         "name": "观察对象",
@@ -237,7 +674,182 @@
           }
         }
       }
-    }
+    },
+    "invisible": true
+  },
+  "enable_feedback_relay": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）启用反馈转达窗口",
+    "default": true,
+    "invisible": true
+  },
+  "feedback_session_id": {
+    "type": "string",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）反馈接收会话 ID",
+    "default": "",
+    "invisible": true
+  },
+  "feedback_proactive_ask": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）察觉不满时主动询问是否反馈",
+    "default": true,
+    "invisible": true
+  },
+  "feedback_allow_anyone": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）允许所有人提交反馈",
+    "default": true,
+    "invisible": true
+  },
+  "feedback_cooldown_seconds": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）同一会话的反馈冷却（秒）",
+    "default": 60,
+    "invisible": true
+  },
+  "feedback_hourly_limit": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）每小时最多转达次数",
+    "default": 30,
+    "invisible": true
+  },
+  "feedback_reply_persona_rewrite": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「帮群友传话」分组）回话时按人设转述",
+    "default": true,
+    "invisible": true
+  },
+  "enable_notice": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）启用群事件小报告",
+    "default": true,
+    "invisible": true
+  },
+  "notice_session_id": {
+    "type": "string",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）小报告接收会话 ID",
+    "default": "",
+    "invisible": true
+  },
+  "notice_ban": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）上报被禁言 / 被解禁",
+    "default": true,
+    "invisible": true
+  },
+  "notice_admin": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）上报被设为 / 被取消管理员",
+    "default": true,
+    "invisible": true
+  },
+  "notice_member_change": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）上报被踢出群 / 被拉入群 / 新好友",
+    "default": true,
+    "invisible": true
+  },
+  "notice_poke": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）上报被戳一戳",
+    "default": false,
+    "invisible": true
+  },
+  "notice_persona_rewrite": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）小报告按人设改写",
+    "default": true,
+    "invisible": true
+  },
+  "notice_snapshot": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）附带出事群的最近消息",
+    "default": true,
+    "invisible": true
+  },
+  "notice_snapshot_count": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）抽查多少条最近消息",
+    "default": 20,
+    "invisible": true
+  },
+  "notice_hourly_limit": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）小报告每小时上限（次）",
+    "default": 30,
+    "invisible": true
+  },
+  "notice_group_whitelist": {
+    "type": "list",
+    "description": "（旧版字段，已迁移到「群事件小报告」分组）只上报这些群（群号）",
+    "default": [],
+    "invisible": true
+  },
+  "enable_card_report": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）启用图片卡片",
+    "default": true,
+    "invisible": true
+  },
+  "card_for_harassment": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）骚扰上报使用卡片",
+    "default": true,
+    "invisible": true
+  },
+  "card_for_feedback": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）传话时使用卡片",
+    "default": true,
+    "invisible": true
+  },
+  "card_for_notice": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）群事件小报告使用卡片",
+    "default": true,
+    "invisible": true
+  },
+  "card_theme": {
+    "type": "string",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）卡片配色",
+    "default": "aurora",
+    "invisible": true
+  },
+  "card_max_messages": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）卡片最多展示几条消息",
+    "default": 14,
+    "invisible": true
+  },
+  "card_width": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）卡片宽度（像素）",
+    "default": 720,
+    "invisible": true
+  },
+  "inject_usage_prompt": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「高级与调试」分组）向 LLM 注入工具使用说明",
+    "default": true,
+    "invisible": true
+  },
+  "max_excerpt_length": {
+    "type": "int",
+    "description": "（旧版字段，已迁移到「高级与调试」分组）单段文本的最大长度（字符）",
+    "default": 300,
+    "invisible": true
+  },
+  "force_plain_text": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「高级与调试」分组）强制以纯文本发送（关闭图文转换）",
+    "default": true,
+    "invisible": true
+  },
+  "debug_log": {
+    "type": "bool",
+    "description": "（旧版字段，已迁移到「高级与调试」分组）输出调试日志",
+    "default": false,
+    "invisible": true
   },
   "watchlist_snapshot": {
     "type": "text",
@@ -245,222 +857,5 @@
     "default": "",
     "hint": "已改用上方可编辑列表，此字段仅用于兼容迁移",
     "invisible": true
-  },
-  "enable_feedback_relay": {
-    "type": "bool",
-    "description": "启用反馈转达窗口",
-    "default": true,
-    "hint": "让用户可以直接对 Bot 说“帮我跟主人说一下…”，由 Bot 把问题带给你"
-  },
-  "feedback_session_id": {
-    "type": "string",
-    "description": "反馈接收会话 ID",
-    "default": "",
-    "hint": "留空则复用上面的“骚扰上报接收会话 ID”。也可在目标会话执行 /hr_bind_feedback"
-  },
-  "feedback_proactive_ask": {
-    "type": "bool",
-    "description": "察觉不满时主动询问是否反馈",
-    "default": true,
-    "hint": "开启后，Bot 发现对方在吐槽功能出错、答非所问、插件报错时，会自然地问一句“要不要我帮你转告”。完全由 LLM 判断，不用任何固定话术"
-  },
-  "feedback_allow_anyone": {
-    "type": "bool",
-    "description": "允许所有人提交反馈",
-    "default": true,
-    "hint": "关闭后只有 AstrBot 管理员、以及在已绑定窗口里的人可以提交，适合防滥用"
-  },
-  "feedback_cooldown_seconds": {
-    "type": "int",
-    "description": "同一会话的反馈冷却（秒）",
-    "default": 60,
-    "min": 0,
-    "max": 86400
-  },
-  "feedback_hourly_limit": {
-    "type": "int",
-    "description": "每小时最多转达次数",
-    "default": 30,
-    "min": 0,
-    "max": 500,
-    "hint": "0 表示不限制"
-  },
-  "feedback_include_history_default": {
-    "type": "bool",
-    "description": "默认附带聊天记录",
-    "default": true,
-    "hint": "LLM 也可以按具体情况自行决定要不要带"
-  },
-  "feedback_history_lines": {
-    "type": "int",
-    "description": "反馈附带的聊天记录行数",
-    "default": 12,
-    "min": 1,
-    "max": 60
-  },
-  "feedback_persona_rewrite": {
-    "type": "bool",
-    "description": "反馈通报按人设改写",
-    "default": true,
-    "hint": "开启后 Bot 会用人设口吻向你转达，而不是干巴巴的表单"
-  },
-  "feedback_reply_persona_rewrite": {
-    "type": "bool",
-    "description": "回复工单时按人设转述",
-    "default": true,
-    "hint": "你用 /hr_reply 回复后，Bot 会用人设口吻把答复带回给提问的人"
-  },
-  "feedback_ticket_max_entries": {
-    "type": "int",
-    "description": "最多保留多少条工单",
-    "default": 100,
-    "min": 10,
-    "max": 1000
-  },
-  "enable_notice": {
-    "type": "bool",
-    "description": "启用群事件小报告",
-    "default": true,
-    "hint": "Bot 被禁言、被踢、被设管理员时主动来找你（仅 OneBot v11 平台可用）"
-  },
-  "notice_session_id": {
-    "type": "string",
-    "description": "小报告接收会话 ID",
-    "default": "",
-    "hint": "留空则复用“骚扰上报接收会话 ID”。也可在目标会话执行 /hr_bind_notice"
-  },
-  "notice_ban": {
-    "type": "bool",
-    "description": "上报被禁言 / 被解禁",
-    "default": true
-  },
-  "notice_admin": {
-    "type": "bool",
-    "description": "上报被设为 / 被取消管理员",
-    "default": true
-  },
-  "notice_member_change": {
-    "type": "bool",
-    "description": "上报被踢出群 / 被拉入群 / 新好友",
-    "default": true
-  },
-  "notice_poke": {
-    "type": "bool",
-    "description": "上报被戳一戳",
-    "default": false,
-    "hint": "戳一戳很频繁，默认关闭"
-  },
-  "notice_persona_rewrite": {
-    "type": "bool",
-    "description": "小报告按人设改写",
-    "default": true,
-    "hint": "开启后是“爱丽丝在群里被禁言了 10 分钟，来跟你告状”的语气，而不是系统告警"
-  },
-  "notice_snapshot": {
-    "type": "bool",
-    "description": "附带出事群的最近消息",
-    "default": true,
-    "hint": "帮你判断到底发生了什么。需要平台支持 get_group_msg_history"
-  },
-  "notice_snapshot_count": {
-    "type": "int",
-    "description": "抽查多少条最近消息",
-    "default": 20,
-    "min": 1,
-    "max": 100,
-    "condition": {
-      "notice_snapshot": true
-    }
-  },
-  "notice_hourly_limit": {
-    "type": "int",
-    "description": "小报告每小时上限（次）",
-    "default": 30,
-    "min": 0,
-    "max": 500,
-    "hint": "与骚扰上报的额度互相独立，群里连续出事不会挤占骚扰上报配额。0 = 不限制"
-  },
-  "notice_group_whitelist": {
-    "type": "list",
-    "description": "只上报这些群（群号）",
-    "default": [],
-    "hint": "留空表示所有群都上报"
-  },
-  "enable_card_report": {
-    "type": "bool",
-    "description": "启用图片卡片",
-    "default": true,
-    "hint": "把聊天记录渲染成一张精美卡片再发给你，比纯文字好读很多。渲染失败会自动退回纯文本"
-  },
-  "card_for_harassment": {
-    "type": "bool",
-    "description": "骚扰上报使用卡片",
-    "default": true,
-    "condition": {
-      "enable_card_report": true
-    }
-  },
-  "card_for_feedback": {
-    "type": "bool",
-    "description": "反馈转达使用卡片",
-    "default": true,
-    "condition": {
-      "enable_card_report": true
-    }
-  },
-  "card_for_notice": {
-    "type": "bool",
-    "description": "群事件小报告使用卡片",
-    "default": true,
-    "condition": {
-      "enable_card_report": true
-    }
-  },
-  "card_keep_text": {
-    "type": "bool",
-    "description": "发卡片的同时也发一份纯文本",
-    "default": false,
-    "hint": "开启后你能直接复制文字内容，代价是每次两条消息",
-    "condition": {
-      "enable_card_report": true
-    }
-  },
-  "card_theme": {
-    "type": "string",
-    "description": "卡片配色",
-    "default": "aurora",
-    "options": [
-      "aurora",
-      "midnight",
-      "paper"
-    ],
-    "labels": [
-      "极光（青紫渐变）",
-      "午夜（深色低亮）",
-      "纸张（浅色高对比）"
-    ],
-    "condition": {
-      "enable_card_report": true
-    }
-  },
-  "card_max_messages": {
-    "type": "int",
-    "description": "卡片最多展示几条消息",
-    "default": 14,
-    "min": 1,
-    "max": 60,
-    "condition": {
-      "enable_card_report": true
-    }
-  },
-  "card_width": {
-    "type": "int",
-    "description": "卡片宽度（像素）",
-    "default": 720,
-    "min": 480,
-    "max": 1200,
-    "condition": {
-      "enable_card_report": true
-    }
   }
 }

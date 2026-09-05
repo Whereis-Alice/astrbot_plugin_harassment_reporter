@@ -17,7 +17,14 @@ from .eventinfo import (
     watch_key,
 )
 from .outbox import STATUS_COOLDOWN, STATUS_DISABLED, STATUS_RATE_LIMITED, Delivery
-from .text import clean_text, now_text, render_template, severity_text, truncate
+from .text import (
+    PLUGIN_DISPLAY_NAME,
+    clean_text,
+    now_text,
+    render_template,
+    severity_text,
+    truncate,
+)
 
 LOG_PREFIX = "[HarassmentReporter]"
 CHANNEL = "harassment"
@@ -57,6 +64,7 @@ class HarassmentService:
         watchlist: Any,
         persona: Any,
         history: Any,
+        chatlog: Any,
         card: Any,
         outbox: Any,
     ) -> None:
@@ -66,6 +74,7 @@ class HarassmentService:
         self.watchlist = watchlist
         self.persona = persona
         self.history = history
+        self.chatlog = chatlog
         self.card = card
         self.outbox = outbox
 
@@ -177,7 +186,7 @@ class HarassmentService:
         structured: str,
     ) -> str:
         settings = self.settings
-        if settings.owner_report_style != "persona_natural" or not settings.owner_report_natural:
+        if settings.owner_report_style != "persona_natural":
             return structured
 
         natural = await self.persona.rewrite_for_event(
@@ -212,52 +221,34 @@ class HarassmentService:
         evidence: str,
         expected_help: str,
     ) -> str | None:
+        """把「群里刚刚发生了什么」画成一张聊天记录卡片。
+
+        证据自己长在聊天记录里，所以卡片上方只放一小段情况说明，
+        剩下的交给真实的对话原文说话。
+        """
         if not self.card.enabled_for("harassment"):
             return None
 
         settings = self.settings
-        rows = await self.history.chat_rows(
-            session_id(event),
-            limit=settings.card_max_messages,
-            user_name=sender_name(event),
-            assistant_name=settings.bot_self_name or "我",
-        )
-        current = message_text(event)
-        if current:
-            rows.append({"role": "user", "name": sender_name(event), "text": current})
+        chatlog = await self.chatlog.collect(event, count=settings.card_max_messages)
 
-        existing = await self.watchlist.get(watch_key(event))
-        meta = [
-            {"label": "时间", "value": now_text()},
-            {"label": "来源", "value": f"{origin_label(event)}·{platform_id(event)}"},
-            {"label": "发送者", "value": f"{sender_name(event)}（{sender_id(event)}）"},
-            {"label": "会话", "value": session_id(event)},
-        ]
-        if existing:
-            meta.append(
-                {"label": "累计上报", "value": f"{int(existing.get('report_count', 0) or 0)} 次"}
-            )
-
-        summary_parts = [f"上报原因：{reason}"]
+        note_parts = [clean_text(reason) or "模型认为当前对话存在骚扰风险"]
         if evidence:
-            summary_parts.append(f"补充证据：{truncate(evidence, settings.max_excerpt_length)}")
+            note_parts.append("补充：" + truncate(evidence, settings.max_excerpt_length))
         if expected_help:
-            summary_parts.append(f"期望处理：{truncate(expected_help, 120)}")
+            note_parts.append("期望处理：" + truncate(expected_help, 120))
+        existing = await self.watchlist.get(watch_key(event))
+        if existing:
+            count = int(existing.get("report_count", 0) or 0)
+            note_parts.append("这个人之前已经被上报过 " + str(count) + " 次。")
 
-        return await self.card.render(
+        return await self.card.render_chatlog(
+            chatlog,
             kind="harassment",
-            title="骚扰预警",
-            subtitle=f"{sender_name(event)} 在 {origin_label(event)} 触发",
-            icon="🚨",
-            badge=f"严重程度 {severity_text(severity)}",
-            badge_level=severity if severity in SEVERITIES else "info",
-            summary="\n".join(summary_parts),
-            summary_title="情况说明",
-            chat_title="相关聊天记录",
-            meta=meta,
-            messages=self.card.build_messages(rows, limit=settings.card_max_messages),
-            footer=f"发给 {settings.receiver_name} ｜ 骚扰上报器",
-            show_empty_chat=True,
+            tag="骚扰预警 · " + severity_text(severity),
+            note="\n".join(note_parts),
+            footer="发给 " + settings.receiver_name + " ｜ " + PLUGIN_DISPLAY_NAME,
+            allow_empty=True,
         )
 
     # ------------------------------------------------------------------

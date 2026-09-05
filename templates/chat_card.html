@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<style>
+  :root { --card-width: {{ card_width }}px; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    width: calc(var(--card-width) + 56px);
+    padding: 28px;
+    font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body.theme-aurora { background: linear-gradient(135deg, #6a5cff 0%, #33b1ff 55%, #7ce7c9 100%); }
+  body.theme-midnight { background: linear-gradient(140deg, #10131c 0%, #1b2338 55%, #2a1f3d 100%); }
+  body.theme-paper { background: linear-gradient(140deg, #f5ede1 0%, #efe3d2 60%, #e6d7c3 100%); }
+
+  .card {
+    width: var(--card-width);
+    border-radius: 20px;
+    overflow: hidden;
+    background: #ffffff;
+    box-shadow: 0 18px 46px rgba(15, 20, 40, 0.28);
+  }
+  body.theme-midnight .card { background: #161b26; color: #e8ecf6; }
+  body.theme-paper .card { background: #fffdf9; }
+
+  /* ---------- 顶栏：像聊天窗口的标题栏 ---------- */
+  .bar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 20px;
+    background: #f7f8fc;
+    border-bottom: 1px solid #ebedf4;
+  }
+  body.theme-midnight .bar { background: #1c2231; border-bottom-color: #262e42; }
+  body.theme-paper .bar { background: #f7f1e7; border-bottom-color: #ece0cf; }
+
+  .bar-icon {
+    width: 40px; height: 40px; flex: 0 0 40px;
+    border-radius: 13px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, #6a5cff, #33b1ff);
+  }
+  .bar-text { min-width: 0; }
+  .bar-title {
+    font-size: 15.5px; font-weight: 700; color: #23283a;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar-sub { margin-top: 2px; font-size: 11.5px; color: #8d94ab; }
+  body.theme-midnight .bar-title { color: #eaeefa; }
+  body.theme-midnight .bar-sub { color: #7b86a4; }
+  .bar-tag {
+    margin-left: auto; flex: 0 0 auto;
+    padding: 5px 11px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+    color: #5a5fd6; background: #eceafe;
+  }
+  body.theme-midnight .bar-tag { color: #a6b0ff; background: #262c46; }
+
+  /* ---------- 说明行：只有骚扰上报和群事件用得到 ---------- */
+  .note {
+    margin: 16px 20px 0;
+    padding: 11px 14px; border-radius: 12px;
+    font-size: 13px; line-height: 1.65; color: #2c3040;
+    background: #f4f6fb; border-left: 3px solid #6a5cff;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  body.theme-midnight .note { background: #1f2637; color: #dbe2f2; border-left-color: #7c8cff; }
+  body.theme-paper .note { background: #faf3e8; border-left-color: #c89b5a; }
+
+  /* ---------- 聊天区 ---------- */
+  .chat { padding: 16px 20px 4px; }
+  .row { display: flex; gap: 9px; margin-bottom: 13px; align-items: flex-start; }
+  .row.right { flex-direction: row-reverse; }
+
+  .face {
+    width: 30px; height: 30px; flex: 0 0 30px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 700; color: #fff;
+    letter-spacing: 0;
+  }
+  .stack { min-width: 0; max-width: 78%; }
+  .row.right .stack { display: flex; flex-direction: column; align-items: flex-end; }
+
+  .who {
+    display: flex; gap: 7px; align-items: baseline;
+    margin: 0 2px 4px; font-size: 11px; color: #8d94ab;
+  }
+  .row.right .who { flex-direction: row-reverse; }
+  .who b { font-weight: 600; color: #6c7590; }
+  body.theme-midnight .who { color: #6f7a97; }
+  body.theme-midnight .who b { color: #97a3c4; }
+
+  .bubble {
+    padding: 9px 13px;
+    border-radius: 4px 14px 14px 14px;
+    font-size: 13.5px; line-height: 1.68;
+    background: #f1f3f8; color: #2b2f3d;
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .row.right .bubble {
+    border-radius: 14px 4px 14px 14px;
+    background: #dfe8ff; color: #23305c;
+  }
+  body.theme-midnight .bubble { background: #222a3c; color: #dfe5f4; }
+  body.theme-midnight .row.right .bubble { background: #2d3d64; color: #dce6ff; }
+  body.theme-paper .bubble { background: #f4efe6; color: #3a3227; }
+  body.theme-paper .row.right .bubble { background: #e7dcc6; color: #40372a; }
+
+  .empty {
+    margin: 4px 0 12px;
+    padding: 18px; border-radius: 12px; font-size: 12.5px;
+    color: #9aa0b4; background: #f7f8fc; text-align: center;
+  }
+  body.theme-midnight .empty { background: #1e2434; }
+
+  /* ---------- 页脚 ---------- */
+  .footer {
+    padding: 12px 20px 15px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 11px; color: #a2a8bb;
+    border-top: 1px solid #eef0f6;
+  }
+  body.theme-midnight .footer { color: #6f7893; border-top-color: #232b3d; }
+  body.theme-paper .footer { border-top-color: #ece0cf; }
+  .footer .spacer { margin-left: auto; }
+</style>
+</head>
+<body class="theme-{{ theme }}">
+  <div class="card">
+    <div class="bar">
+      <div class="bar-icon">{{ icon }}</div>
+      <div class="bar-text">
+        <div class="bar-title">{{ title }}</div>
+        {% if subtitle %}<div class="bar-sub">{{ subtitle }}</div>{% endif %}
+      </div>
+      {% if tag %}<div class="bar-tag">{{ tag }}</div>{% endif %}
+    </div>
+
+    {% if note %}<div class="note">{{ note }}</div>{% endif %}
+
+    <div class="chat">
+      {% for msg in messages %}
+      <div class="row {% if msg.side == 'right' %}right{% endif %}">
+        {% if show_avatar %}<div class="face" style="background: {{ msg.color }}">{{ msg.initial }}</div>{% endif %}
+        <div class="stack">
+          <div class="who"><b>{{ msg.name }}</b>{% if msg.time %}<span>{{ msg.time }}</span>{% endif %}</div>
+          <div class="bubble">{{ msg.text }}</div>
+        </div>
+      </div>
+      {% endfor %}
+      {% if not messages %}<div class="empty">{{ empty_hint }}</div>{% endif %}
+    </div>
+
+    <div class="footer">
+      <div>{{ footer }}</div>
+      <div class="spacer">{{ generated_at }}</div>
+    </div>
+  </div>
+</body>
+</html>

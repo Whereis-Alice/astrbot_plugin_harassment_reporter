@@ -46,6 +46,8 @@ class OneBotCapability:
     """记录本次运行时探测到的实现能力，避免反复调用失败的接口。"""
 
     history_supports_count: bool = True
+    private_history_supported: bool = True
+    private_history_supports_count: bool = True
     forward_supported: bool = True
     forward_failures: int = 0
     failures: dict[str, int] = field(default_factory=dict)
@@ -199,6 +201,47 @@ class OneBotBridge:
         return ""
 
     @staticmethod
+    def _normalize_history(
+        messages: list[dict[str, Any]],
+        *,
+        count: int,
+        self_id: str = "",
+        text_limit: int = 200,
+    ) -> list[ChatLine]:
+        """把 OneBot 返回的原始消息列表标准化成 ChatLine。
+
+        群聊和私聊两个接口的返回结构一致，所以共用这一段。
+        """
+        mine = clean_text(self_id)
+        lines: list[ChatLine] = []
+        for item in messages[-max(1, count) :]:
+            sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
+            sender_id = clean_text(sender.get("user_id")) or clean_text(item.get("user_id"))
+            sender_name = (
+                clean_text(sender.get("card"))
+                or clean_text(sender.get("nickname"))
+                or clean_text(item.get("nickname"))
+                or (sender_id or "未知用户")
+            )
+            text = segments_to_text(item.get("message"), limit=text_limit)
+            if not text:
+                text = truncate(clean_text(item.get("raw_message")), text_limit)
+            try:
+                timestamp = float(item.get("time") or 0)
+            except Exception:
+                timestamp = 0.0
+            lines.append(
+                ChatLine(
+                    sender_name=sender_name,
+                    sender_id=sender_id,
+                    text=text or "[空消息]",
+                    timestamp=timestamp or time.time(),
+                    is_self=bool(mine) and sender_id == mine,
+                )
+            )
+        return lines
+
+    @staticmethod
     def _extract_history_messages(result: Any) -> list[dict[str, Any]]:
         if isinstance(result, dict):
             for key in ("messages", "data", "message"):
@@ -243,34 +286,57 @@ class OneBotBridge:
         messages = self._extract_history_messages(result)
         if not messages:
             return []
+        return self._normalize_history(
+            messages,
+            count=count,
+            self_id=self_id,
+            text_limit=text_limit,
+        )
 
-        lines: list[ChatLine] = []
-        for item in messages[-max(1, count) :]:
-            sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
-            sender_id = clean_text(sender.get("user_id")) or clean_text(item.get("user_id"))
-            sender_name = (
-                clean_text(sender.get("card"))
-                or clean_text(sender.get("nickname"))
-                or clean_text(item.get("nickname"))
-                or (sender_id or "未知用户")
+    async def fetch_private_history(
+        self,
+        client: Any,
+        user_id: Any,
+        *,
+        count: int = 20,
+        self_id: str = "",
+        text_limit: int = 200,
+    ) -> list[ChatLine]:
+        """拉取私聊历史消息。
+
+        get_friend_msg_history 不在 OneBot v11 标准里，只有 NapCat、LLOneBot 等
+        扩展实现提供，所以第一次调用失败后就记下来不再重试。
+        """
+        uid = clean_text(user_id)
+        if not uid or client is None or not self.capability.private_history_supported:
+            return []
+        user_arg: Any = int(uid) if uid.isdigit() else uid
+
+        result = None
+        if self.capability.private_history_supports_count:
+            result = await self.call(
+                client,
+                "get_friend_msg_history",
+                user_id=user_arg,
+                count=max(1, min(100, count)),
             )
-            text = segments_to_text(item.get("message"), limit=text_limit)
-            if not text:
-                text = truncate(clean_text(item.get("raw_message")), text_limit)
-            try:
-                timestamp = float(item.get("time") or 0)
-            except Exception:
-                timestamp = 0.0
-            lines.append(
-                ChatLine(
-                    sender_name=sender_name,
-                    sender_id=sender_id,
-                    text=text or "[空消息]",
-                    timestamp=timestamp or time.time(),
-                    is_self=bool(self_id) and sender_id == clean_text(self_id),
-                )
-            )
-        return lines
+            if result is None:
+                self.capability.private_history_supports_count = False
+        if result is None:
+            result = await self.call(client, "get_friend_msg_history", user_id=user_arg)
+        if result is None:
+            self.capability.private_history_supported = False
+            return []
+
+        messages = self._extract_history_messages(result)
+        if not messages:
+            return []
+        return self._normalize_history(
+            messages,
+            count=count,
+            self_id=self_id,
+            text_limit=text_limit,
+        )
 
     def build_forward_node(self, *, name: str, uin: str, text: str) -> dict[str, Any]:
         data: dict[str, Any] = {

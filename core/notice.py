@@ -8,7 +8,14 @@ from .eventinfo import self_id as event_self_id
 from .eventinfo import session_id
 from .onebot import get_client, get_raw_notice, is_onebot_event
 from .outbox import STATUS_DISABLED, Delivery
-from .text import clean_text, convert_duration, now_text, pack_lines, truncate
+from .text import (
+    PLUGIN_DISPLAY_NAME,
+    clean_text,
+    convert_duration,
+    now_text,
+    pack_lines,
+    truncate,
+)
 
 LOG_PREFIX = "[HarassmentReporter]"
 CHANNEL = "notice"
@@ -121,8 +128,7 @@ class NoticeService:
                     kind="ban_lift",
                     title="禁言解除",
                     icon="🔓",
-                    badge="已解禁",
-                    badge_level="low",
+                    tag="已解禁",
                     headline="我在这个群里的禁言被解除了，又可以说话了。",
                     group_id=group,
                     operator_id=operator,
@@ -132,8 +138,7 @@ class NoticeService:
                 kind="ban",
                 title="我被禁言了",
                 icon="🔇",
-                badge="被禁言",
-                badge_level="high",
+                tag="被禁言",
                 headline="我在这个群里被管理员禁言了，暂时说不了话。",
                 group_id=group,
                 operator_id=operator,
@@ -148,8 +153,7 @@ class NoticeService:
                     kind="admin_unset",
                     title="管理员被取消",
                     icon="📉",
-                    badge="取消管理",
-                    badge_level="medium",
+                    tag="取消管理",
                     headline="我在这个群里的管理员权限被取消了。",
                     group_id=group,
                     operator_id=operator,
@@ -159,8 +163,7 @@ class NoticeService:
                 kind="admin_set",
                 title="升职成管理员",
                 icon="📈",
-                badge="设为管理",
-                badge_level="low",
+                tag="设为管理",
                 headline="我在这个群里被设为管理员了。",
                 group_id=group,
                 operator_id=operator,
@@ -175,8 +178,7 @@ class NoticeService:
                     kind="kicked",
                     title="我被踢出群了",
                     icon="🚪",
-                    badge="被移出",
-                    badge_level="high",
+                    tag="被移出",
                     headline="我被人从这个群里踢出去了。",
                     group_id=group,
                     operator_id=operator,
@@ -187,8 +189,7 @@ class NoticeService:
                 kind="left",
                 title="我离开了一个群",
                 icon="🚪",
-                badge="已退群",
-                badge_level="medium",
+                tag="已退群",
                 headline="我不在这个群里了（可能是主动退出或群被解散）。",
                 group_id=group,
                 operator_id=operator,
@@ -204,8 +205,7 @@ class NoticeService:
                 kind="joined",
                 title="我进了一个新群",
                 icon="🎉",
-                badge="新群",
-                badge_level="low",
+                tag="新群",
                 headline="我刚刚加入了一个新群，" + how + "。",
                 group_id=group,
                 operator_id=operator,
@@ -217,8 +217,7 @@ class NoticeService:
                 kind="friend_add",
                 title="加了个新好友",
                 icon="🤝",
-                badge="新好友",
-                badge_level="info",
+                tag="新好友",
                 headline="有人把我加成好友了。",
                 group_id="",
                 operator_id=user,
@@ -233,8 +232,7 @@ class NoticeService:
                 kind="poke",
                 title="有人戳我",
                 icon="👆",
-                badge="戳一戳",
-                badge_level="info",
+                tag="戳一戳",
                 headline="有人戳了我一下。",
                 group_id=group,
                 operator_id=user,
@@ -250,8 +248,7 @@ class NoticeService:
         kind: str,
         title: str,
         icon: str,
-        badge: str,
-        badge_level: str,
+        tag: str,
         headline: str,
         group_id: str,
         operator_id: str,
@@ -262,8 +259,7 @@ class NoticeService:
             "kind": kind,
             "title": title,
             "icon": icon,
-            "badge": badge,
-            "badge_level": badge_level,
+            "tag": tag,
             "headline": headline,
             "group_id": group_id,
             "operator_id": operator_id,
@@ -307,7 +303,8 @@ class NoticeService:
         if want_snapshot:
             rows, snapshot_block = await self._collect_snapshot(event, group)
 
-        structured = "\n".join(lines)
+        base = "\n".join(lines)
+        structured = base
         if snapshot_block:
             structured += "\n\n这个群最近的消息：\n" + snapshot_block
 
@@ -335,13 +332,11 @@ class NoticeService:
             where=where,
             who=who if operator_id else "",
             rows=rows,
-            group_name=group_name,
-            group=group,
         )
 
-        if image_path and not settings.card_keep_text and snapshot_block:
-            # 卡片里已经有聊天记录了，纯文本里就不再重复一遍。
-            text = "\n".join(lines)
+        if image_path and snapshot_block and text == structured:
+            # 卡片里已经有聊天记录了，纯文本就不必再重复一遍。
+            text = base
 
         delivery = await self.outbox.deliver(
             channel=CHANNEL,
@@ -436,23 +431,15 @@ class NoticeService:
             image_path = await self.card.render(
                 kind="notice",
                 title="群消息抽查",
-                subtitle=where,
+                subtitle=where + " · 最近 " + str(len(rows)) + " 条",
                 icon="🔍",
-                badge=str(len(rows)) + " 条",
-                badge_level="info",
-                summary="",
-                chat_title="最近消息",
-                meta=[
-                    {"label": "时间", "value": now_text()},
-                    {"label": "群号", "value": group},
-                    {"label": "群名", "value": group_name},
-                ],
+                tag="抽查",
                 messages=self.card.build_messages(rows, limit=self.settings.card_max_messages),
-                footer="群消息抽查 ｜ 骚扰上报器",
+                footer="群消息抽查 ｜ " + PLUGIN_DISPLAY_NAME,
             )
 
         text = "【群消息抽查】" + where + "\n时间：" + now_text()
-        if image_path is None or self.settings.card_keep_text:
+        if image_path is None:
             text += "\n\n" + truncate(block, 2000)
 
         delivery = await self.outbox.deliver(
@@ -511,39 +498,26 @@ class NoticeService:
         where: str,
         who: str,
         rows: list[dict[str, Any]],
-        group_name: str,
-        group: str,
     ) -> str | None:
+        """群事件卡片：上方一小段「发生了什么」，下方是这个群最近在聊什么。"""
         if not self.card.enabled_for("notice"):
             return None
 
-        meta = [
-            {"label": "时间", "value": now_text()},
-            {"label": "位置", "value": where},
-        ]
-        if group:
-            meta.append({"label": "群号", "value": group})
-        if group_name:
-            meta.append({"label": "群名", "value": group_name})
+        note_parts = [payload["headline"]]
+        note_parts.extend(payload["extra_lines"])
         if who:
-            meta.append({"label": "操作者", "value": who})
-
-        summary_parts = [payload["headline"]]
-        summary_parts.extend(payload["extra_lines"])
+            note_parts.append("操作者：" + who)
 
         return await self.card.render(
             kind="notice",
             title=payload["title"],
             subtitle=where,
             icon=payload["icon"],
-            badge=payload["badge"],
-            badge_level=payload["badge_level"],
-            summary="\n".join(part for part in summary_parts if part),
-            summary_title="发生了什么",
-            chat_title="这个群最近在聊",
-            meta=meta,
+            tag=payload["tag"],
+            note="\n".join(part for part in note_parts if part),
             messages=self.card.build_messages(rows, limit=self.settings.card_max_messages)
             if rows
             else [],
             footer="发给 " + self.settings.receiver_name + " ｜ 群事件通知",
+            empty_hint="没抓到这个群最近的消息",
         )

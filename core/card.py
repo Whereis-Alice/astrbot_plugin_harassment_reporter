@@ -1,20 +1,43 @@
+"""聊天记录卡片。
+
+这张卡片只做一件事：把「最近的聊天记录」画成一张像聊天截图的图片。
+它是纯粹的锦上添花 —— 渲染失败一律返回 None，调用方继续用纯文本发送，
+绝不因为画图失败而让消息送不出去。
+"""
+
 from __future__ import annotations
 
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger
 
-from .text import clean_text, now_text, truncate
+from .text import PLUGIN_DISPLAY_NAME, clean_text, format_ts, now_text, truncate
 
 LOG_PREFIX = "[HarassmentReporter]"
-TEMPLATE_FILE = Path(__file__).resolve().parent.parent / "templates" / "report_card.html"
+TEMPLATE_FILE = Path(__file__).resolve().parent.parent / "templates" / "chat_card.html"
 
-# 卡片渲染依赖 AstrBot 的文转图服务（走网络）。连续失败时先熄火一段时间，
-# 避免每次上报都白等一轮网络超时。
+# 卡片渲染依赖 AstrBot 的文转图服务（要起浏览器、可能走网络）。
+# 连续失败时先熄火一段时间，避免每次上报都白等一轮超时。
 FAILURE_THRESHOLD = 3
 COOLDOWN_AFTER_FAILURE = 600
+
+# 头像底色。按发送者取一个稳定的颜色，同一个人每次都是同一色，
+# 这样一眼就能看出「谁在说话」。
+AVATAR_COLORS = (
+    "#6a5cff",
+    "#ff7a59",
+    "#2fb583",
+    "#3f8cff",
+    "#c869d6",
+    "#e0873a",
+    "#3fb0c9",
+    "#d9536f",
+    "#7d8bff",
+    "#59a14f",
+)
 
 
 def _plain(value: Any, limit: int = 400) -> str:
@@ -23,11 +46,26 @@ def _plain(value: Any, limit: int = 400) -> str:
     return truncate(text, limit)
 
 
-class CardRenderer:
-    """把上报内容渲染成一张聊天记录卡片。
+def _avatar_color(seed: str) -> str:
+    """按发送者算一个固定的头像底色。
 
-    渲染永远是"锦上添花"：失败时返回 None，调用方继续用纯文本发送。
+    这里用 crc32 而不是内置 hash()：Python 的字符串 hash 每次启动都会加盐，
+    同一个人在不同次运行里会变色。
     """
+    key = clean_text(seed) or "unknown"
+    return AVATAR_COLORS[zlib.crc32(key.encode("utf-8")) % len(AVATAR_COLORS)]
+
+
+def _initial(name: str) -> str:
+    """取昵称里第一个能显示的字符当头像文字。"""
+    for char in clean_text(name):
+        if char.strip():
+            return char.upper()
+    return "?"
+
+
+class CardRenderer:
+    """把聊天记录渲染成一张卡片图。"""
 
     def __init__(self, star: Any, settings: Any) -> None:
         self._star = star
@@ -57,6 +95,9 @@ class CardRenderer:
             return settings.card_for_notice
         return True
 
+    # ------------------------------------------------------------------
+    # 气泡数据
+    # ------------------------------------------------------------------
     def build_messages(
         self,
         lines: list[dict[str, Any]],
@@ -64,69 +105,63 @@ class CardRenderer:
         limit: int,
         text_limit: int = 320,
     ) -> list[dict[str, str]]:
-        """把标准化聊天行转换成卡片气泡数据。
+        """把标准化聊天行（ChatLine.as_dict()）转成卡片气泡数据。
 
-        role 为 assistant（Bot 自己说的话）时靠右显示。
+        Bot 自己说的话靠右显示，其余靠左，和常见聊天软件一致。
         """
-        from .text import format_ts
-
+        show_time = self._settings.card_show_time
         messages: list[dict[str, str]] = []
         for line in lines[-max(1, limit) :]:
-            role = clean_text(line.get("role")) or ("assistant" if line.get("is_self") else "user")
-            timestamp = line.get("timestamp")
+            is_self = bool(line.get("is_self"))
+            name = _plain(line.get("sender_name") or line.get("name") or "未知用户", 24)
+            seed = clean_text(line.get("sender_id")) or name
+            stamp = line.get("timestamp")
             messages.append(
                 {
-                    "role": role,
-                    "side": "right" if role == "assistant" else "left",
-                    "name": _plain(line.get("name") or line.get("sender_name") or "未知用户", 40),
-                    "time": clean_text(line.get("time"))
-                    or (format_ts(timestamp, "%m-%d %H:%M") if timestamp else ""),
+                    "side": "right" if is_self else "left",
+                    "name": name,
+                    "initial": _initial(name),
+                    "color": _avatar_color(seed),
+                    "time": (format_ts(stamp, "%H:%M") if (show_time and stamp) else ""),
                     "text": _plain(line.get("text"), text_limit) or "[空消息]",
                 }
             )
         return messages
 
+    # ------------------------------------------------------------------
+    # 渲染
+    # ------------------------------------------------------------------
     async def render(
         self,
         *,
         kind: str,
         title: str,
         subtitle: str = "",
-        icon: str = "🦊",
-        badge: str = "",
-        badge_level: str = "info",
-        summary: str = "",
-        summary_title: str = "情况说明",
-        chat_title: str = "聊天记录",
-        meta: list[dict[str, str]] | None = None,
+        icon: str = "",
+        tag: str = "",
+        note: str = "",
         messages: list[dict[str, str]] | None = None,
         footer: str = "",
-        show_empty_chat: bool = False,
+        empty_hint: str = "这次没有可附带的聊天记录",
     ) -> str | None:
-        """渲染卡片并返回本地图片路径；不可用或失败时返回 None。"""
+        """渲染卡片并返回本地图片路径；功能关闭、熄火中或渲染失败时返回 None。"""
         if not self.enabled_for(kind) or self.muted:
             return None
 
+        clean_title = _plain(title, 40) or "聊天记录"
         data = {
             "theme": self._settings.card_theme,
             "card_width": self._settings.card_width,
-            "icon": icon or "🦊",
-            "title": _plain(title, 40) or "消息卡片",
+            "icon": _plain(icon, 2) or _initial(clean_title),
+            "title": clean_title,
             "subtitle": _plain(subtitle, 90),
-            "badge": _plain(badge, 24),
-            "badge_level": badge_level if badge_level in {"high", "medium", "low", "info"} else "info",
-            "summary": _plain(summary, 1200),
-            "summary_title": _plain(summary_title, 20),
-            "chat_title": _plain(chat_title, 20),
-            "meta": [
-                {"label": _plain(item.get("label"), 16), "value": _plain(item.get("value"), 120)}
-                for item in (meta or [])
-                if clean_text(item.get("value"))
-            ],
+            "tag": _plain(tag, 16),
+            "note": _plain(note, 600),
             "messages": messages or [],
-            "footer": _plain(footer, 90) or "由 骚扰上报器 / 反馈窗口 生成",
+            "footer": _plain(footer, 90) or f"由「{PLUGIN_DISPLAY_NAME}」生成",
             "generated_at": now_text(),
-            "show_empty_chat": bool(show_empty_chat),
+            "empty_hint": _plain(empty_hint, 60),
+            "show_avatar": bool(self._settings.card_show_avatar),
         }
 
         try:
@@ -159,3 +194,36 @@ class CardRenderer:
         if not path or not Path(path).exists():
             return None
         return path
+
+    # ------------------------------------------------------------------
+    # 便捷入口
+    # ------------------------------------------------------------------
+    async def render_chatlog(
+        self,
+        chatlog: Any,
+        *,
+        kind: str,
+        tag: str = "",
+        note: str = "",
+        footer: str = "",
+        empty_hint: str = "这次没有可附带的聊天记录",
+        allow_empty: bool = False,
+    ) -> str | None:
+        """直接把一个 ChatLog 画成卡片，三条链路共用。"""
+        if chatlog is None:
+            return None
+        if chatlog.empty and not allow_empty:
+            return None
+        return await self.render(
+            kind=kind,
+            title=chatlog.title,
+            subtitle=chatlog.subtitle,
+            tag=tag,
+            note=note,
+            messages=self.build_messages(
+                chatlog.rows(),
+                limit=self._settings.card_max_messages,
+            ),
+            footer=footer,
+            empty_hint=empty_hint,
+        )

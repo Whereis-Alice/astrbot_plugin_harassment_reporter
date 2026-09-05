@@ -9,7 +9,7 @@ WATCHLIST_STORAGE_KEY = "watchlist_v1"
 WARN_CACHE_STORAGE_KEY = "warned_sessions_v1"
 COOLDOWN_STORAGE_KEY = "report_cooldown_v1"
 RATE_STORAGE_KEY = "rate_counter_v1"
-TICKET_STORAGE_KEY = "feedback_tickets_v1"
+CONTACT_STORAGE_KEY = "feedback_contacts_v1"
 
 
 class KVHost(Protocol):
@@ -37,6 +37,15 @@ class Store:
         except Exception:
             return {}
         return dict(data) if isinstance(data, dict) else {}
+
+    async def _get_list(self, key: str) -> list[dict[str, Any]]:
+        try:
+            data = await self._host.get_kv_data(key, [])
+        except Exception:
+            return []
+        if not isinstance(data, list):
+            return []
+        return [dict(item) for item in data if isinstance(item, dict)]
 
     async def _put(self, key: str, value: Any) -> None:
         try:
@@ -144,61 +153,29 @@ class Store:
         await self._put(RATE_STORAGE_KEY, data)
 
     # ------------------------------------------------------------------
-    # 反馈工单
+    # 最近联系记录
     # ------------------------------------------------------------------
-    async def get_tickets(self) -> dict[str, dict[str, Any]]:
-        raw = await self._get_dict(TICKET_STORAGE_KEY)
-        return {str(k): dict(v) for k, v in raw.items() if isinstance(v, dict)}
+    # 这里不做工单系统，只是一本「最近谁通过我找过你」的簿子：
+    # 列表按时间倒序，第 1 条就是最近一次，主人用 /hr_back 回话时按序号取。
+    async def get_contacts(self) -> list[dict[str, Any]]:
+        return await self._get_list(CONTACT_STORAGE_KEY)
 
-    async def put_tickets(self, tickets: dict[str, dict[str, Any]]) -> None:
-        await self._put(TICKET_STORAGE_KEY, tickets)
+    async def put_contacts(self, contacts: list[dict[str, Any]]) -> None:
+        await self._put(CONTACT_STORAGE_KEY, contacts)
 
-    async def save_ticket(self, ticket_id: str, payload: dict[str, Any], max_entries: int) -> None:
-        tickets = await self.get_tickets()
-        tickets[ticket_id] = payload
-        if len(tickets) > max_entries:
-            kept = sorted(
-                tickets.items(),
-                key=lambda item: float(item[1].get("created_at", 0) or 0),
-                reverse=True,
-            )[:max_entries]
-            tickets = dict(kept)
-        await self.put_tickets(tickets)
+    async def add_contact(self, payload: dict[str, Any], max_entries: int) -> None:
+        contacts = await self.get_contacts()
+        contacts.insert(0, payload)
+        await self.put_contacts(contacts[: max(1, max_entries)])
 
-    async def get_ticket(self, ticket_id: str) -> dict[str, Any] | None:
-        tickets = await self.get_tickets()
-        wanted = clean_text(ticket_id).upper()
-        if wanted in tickets:
-            return tickets[wanted]
-        # 允许只输入后 4 位短码
-        matched = [key for key in tickets if key.upper().endswith(wanted)]
-        if len(matched) == 1:
-            return tickets[matched[0]]
-        return None
-
-    async def resolve_ticket_id(self, ticket_id: str) -> str:
-        tickets = await self.get_tickets()
-        wanted = clean_text(ticket_id).upper()
-        if wanted in tickets:
-            return wanted
-        matched = [key for key in tickets if key.upper().endswith(wanted)]
-        if len(matched) == 1:
-            return matched[0]
-        return ""
-
-    async def update_ticket(self, ticket_id: str, **changes: Any) -> bool:
-        tickets = await self.get_tickets()
-        if ticket_id not in tickets:
+    async def mark_contact_replied(self, index: int, reply: str) -> bool:
+        contacts = await self.get_contacts()
+        if index < 0 or index >= len(contacts):
             return False
-        entry = tickets[ticket_id]
-        for key, value in changes.items():
-            if key == "reply":
-                entry[key] = truncate(clean_text(value), 500)
-            else:
-                entry[key] = value
-        tickets[ticket_id] = entry
-        await self.put_tickets(tickets)
+        contacts[index]["reply"] = truncate(clean_text(reply), 500)
+        contacts[index]["replied_at"] = time.time()
+        await self.put_contacts(contacts)
         return True
 
-    async def clear_tickets(self) -> None:
-        await self.put_tickets({})
+    async def clear_contacts(self) -> None:
+        await self.put_contacts([])

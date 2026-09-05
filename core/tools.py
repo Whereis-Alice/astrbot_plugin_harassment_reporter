@@ -21,20 +21,6 @@ def _event_of(context: ContextWrapper[AstrAgentContext]) -> Any:
         return None
 
 
-def _optional_bool(value: Any) -> bool | None:
-    """工具参数里没给 include_history 时返回 None，交给配置决定默认值。"""
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    text = clean_text(value).lower()
-    if text in {"true", "yes", "1", "on"}:
-        return True
-    if text in {"false", "no", "0", "off"}:
-        return False
-    return None
-
-
 @dataclass
 class HarassmentReportTool(FunctionTool[AstrAgentContext]):
     """模型觉得自己被骚扰时，主动把情况报给主人。"""
@@ -92,50 +78,32 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
 
 @dataclass
 class FeedbackRelayTool(FunctionTool[AstrAgentContext]):
-    """把用户的问题、建议或吐槽带给主人，相当于一个随身反馈窗口。"""
+    """让模型主动去找主人带句话，相当于给它加了一条随身的传话通道。"""
 
     name: str = "relay_feedback_to_owner"
     description: str = (
-        "把用户的问题、bug、建议或吐槽转达给主人（Bot 的开发者/主人）。"
-        "适用场景：用户明确请你帮忙传话；或者你察觉到用户对某个功能不满意、"
-        "遇到报错、觉得答非所问，并且他同意让你把问题反馈上去。"
-        "转达前请先确认用户愿意，不要背着用户上报闲聊内容。"
+        "主动去找主人（Bot 的开发者/主人）带一句话，就像你自己走出去喊他一声。"
+        "适用场景：用户请你帮忙找主人或传话；或者你察觉到用户遇到报错、功能不好用、"
+        "答非所问，并且他愿意让你把这件事告诉主人。"
+        "调用时把要对主人说的话完整写进 message，用你自己的口吻写，"
+        "就像你亲自去找他说话一样，说清楚是谁在哪里、遇到了什么。"
+        "最近的群聊记录会自动附上，你不用复述聊天内容。"
+        "带话前请先确认用户愿意，不要背着用户上报闲聊。"
     )
     parameters: dict = Field(
         default_factory=lambda: {
             "type": "object",
             "properties": {
-                "summary": {
-                    "type": "string",
-                    "description": "一句话概括用户要反馈什么，主人只看这一句也能明白。",
-                },
-                "category": {
+                "message": {
                     "type": "string",
                     "description": (
-                        "反馈类别：bug 疑似故障 / feature_request 功能建议 / "
-                        "complaint 体验吐槽 / question 使用疑问 / other 其他。"
+                        "你要对主人说的完整一句话，用你自己的口吻写，"
+                        "例如「群里有人找你呀，说是画图插件坏了」。"
+                        "不要写成工单或模板，也不要只写一个关键词。"
                     ),
-                    "enum": ["bug", "feature_request", "complaint", "question", "other"],
-                },
-                "detail": {
-                    "type": "string",
-                    "description": "可选。补充细节，例如涉及哪个插件或命令、报错内容、复现步骤。",
-                },
-                "urgency": {
-                    "type": "string",
-                    "description": "可选。紧急程度，默认 medium。",
-                    "enum": ["low", "medium", "high"],
-                },
-                "include_history": {
-                    "type": "boolean",
-                    "description": "可选。是否附带最近几轮对话记录，方便主人看上下文。",
-                },
-                "reporter_note": {
-                    "type": "string",
-                    "description": "可选。你自己想对主人补充的一句话，比如你的判断或观察。",
                 },
             },
-            "required": ["summary"],
+            "required": ["message"],
         }
     )
     plugin: Any = Field(default=None)
@@ -152,10 +120,5 @@ class FeedbackRelayTool(FunctionTool[AstrAgentContext]):
             return "转达失败：拿不到当前消息事件。"
         return await self.plugin.handle_tool_feedback(
             event=event,
-            summary=clean_text(kwargs.get("summary")),
-            category=clean_text(kwargs.get("category"), "other").lower(),
-            detail=clean_text(kwargs.get("detail")),
-            urgency=clean_text(kwargs.get("urgency"), "medium").lower(),
-            include_history=_optional_bool(kwargs.get("include_history")),
-            reporter_note=clean_text(kwargs.get("reporter_note")),
+            message=clean_text(kwargs.get("message")),
         )
