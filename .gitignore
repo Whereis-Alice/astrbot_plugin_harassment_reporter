@@ -1,3 +1,12 @@
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# AstrBot 运行时数据
 data/
+
+# 本地临时产物
+.tmp*/
+*.log

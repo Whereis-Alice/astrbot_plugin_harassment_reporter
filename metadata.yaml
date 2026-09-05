@@ -1,7 +1,8 @@
 name: astrbot_plugin_harassment_reporter
 display_name: 骚扰上报器
-desc: 给 LLM 提供一个可主动调用的工具，在它感觉被骚扰时向指定会话上报情况，并支持静默/警告/观察名单等策略
-version: 1.2.4
+desc: 让 Bot 学会主动找你 —— 被骚扰时上报、把群友的反馈带给你、被禁言被踢时打小报告，全部支持精美聊天卡片
+short_desc: 骚扰上报 + 反馈转达 + 群事件小报告，Bot 主动找主人的三合一插件
+version: 2.0.0
 author: Huli3
 repo: https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter
 astrbot_version: ">=4.16,<5"

@@ -1,1 +1,9 @@
-# No extra dependencies.
+# 本插件不需要任何第三方 Python 依赖。
+#
+# 全部功能都基于 AstrBot 自带能力实现：
+#   - LLM 函数工具        -> astrbot.api.star Context.add_llm_tools
+#   - 图片卡片渲染         -> astrbot.api.star Star.html_render（AstrBot 内置渲染服务）
+#   - 持久化              -> AstrBot 插件 KV 存储
+#   - 群事件与历史消息      -> OneBot v11 适配器（aiocqhttp）
+#
+# 保留此文件是为了让 AstrBot 的插件安装流程有一致的处理路径。
