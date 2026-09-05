@@ -30,6 +30,7 @@ class ChatLine:
     text: str = ""
     timestamp: float = 0.0
     is_self: bool = False
+    avatar: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -38,6 +39,7 @@ class ChatLine:
             "text": self.text,
             "timestamp": self.timestamp,
             "is_self": self.is_self,
+            "avatar": self.avatar,
         }
 
 
@@ -67,6 +69,24 @@ class OneBotCapability:
         self.forward_failures += 1
         if self.forward_failures >= FORWARD_FAILURE_LIMIT:
             self.forward_supported = False
+
+
+# QQ 的公开头像地址，直接拼 QQ 号 / 群号就能取到，不需要登录态。
+# 卡片是交给文转图服务渲染的，由那一端去拉这两个地址。
+QQ_USER_AVATAR = "https://q1.qlogo.cn/g?b=qq&nk={uin}&s=640"
+QQ_GROUP_AVATAR = "https://p.qlogo.cn/gh/{gid}/{gid}/640/"
+
+
+def qq_user_avatar(uin: Any) -> str:
+    """用户头像地址。只认纯数字 QQ 号，其余一律返回空串走首字块兜底。"""
+    value = clean_text(uin)
+    return QQ_USER_AVATAR.format(uin=value) if value.isdigit() else ""
+
+
+def qq_group_avatar(gid: Any) -> str:
+    """群头像地址。同样只认纯数字群号。"""
+    value = clean_text(gid)
+    return QQ_GROUP_AVATAR.format(gid=value) if value.isdigit() else ""
 
 
 def is_onebot_event(event: Any) -> bool:

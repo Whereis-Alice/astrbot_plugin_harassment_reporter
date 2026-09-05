@@ -3,148 +3,192 @@
 <head>
 <meta charset="utf-8" />
 <style>
-  :root { --card-width: {{ card_width }}px; }
+  /* 这张卡片要像一张真实的聊天截图：整幅铺满，不留多余背景色块。 */
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; }
   body {
-    width: calc(var(--card-width) + 56px);
-    padding: 28px;
+    min-height: 100vh;
     font-family: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", sans-serif;
     -webkit-font-smoothing: antialiased;
+    background: var(--page);
+    color: var(--bubble-text);
   }
-  body.theme-aurora { background: linear-gradient(135deg, #6a5cff 0%, #33b1ff 55%, #7ce7c9 100%); }
-  body.theme-midnight { background: linear-gradient(140deg, #10131c 0%, #1b2338 55%, #2a1f3d 100%); }
-  body.theme-paper { background: linear-gradient(140deg, #f5ede1 0%, #efe3d2 60%, #e6d7c3 100%); }
 
-  .card {
-    width: var(--card-width);
-    border-radius: 20px;
-    overflow: hidden;
-    background: #ffffff;
-    box-shadow: 0 18px 46px rgba(15, 20, 40, 0.28);
+  /* ---------- 三套配色。只换颜色，版式完全一致 ---------- */
+  body.theme-aurora {
+    --page: #edf0f6;
+    --bar: #fbfcfe;
+    --line: #e1e5ee;
+    --title: #1f2430;
+    --muted: #8a92a6;
+    --name: #6f7893;
+    --bubble: #ffffff;
+    --bubble-text: #262b38;
+    --mine: #d3e3ff;
+    --mine-text: #1d2c4e;
+    --accent: #5b6cff;
+    --tag-bg: #e9ecfd;
+    --tag-text: #5560d1;
+    --note-bg: #ffffff;
+    --shadow: rgba(24, 32, 56, 0.06);
   }
-  body.theme-midnight .card { background: #161b26; color: #e8ecf6; }
-  body.theme-paper .card { background: #fffdf9; }
+  body.theme-midnight {
+    --page: #13161e;
+    --bar: #1a1f2b;
+    --line: #262d3d;
+    --title: #e9edf8;
+    --muted: #6d7690;
+    --name: #94a0bf;
+    --bubble: #222836;
+    --bubble-text: #dfe4f1;
+    --mine: #2e4066;
+    --mine-text: #dae4ff;
+    --accent: #7c8cff;
+    --tag-bg: #262d47;
+    --tag-text: #a4aeff;
+    --note-bg: #1d2331;
+    --shadow: rgba(0, 0, 0, 0.25);
+  }
+  body.theme-paper {
+    --page: #f2ebdf;
+    --bar: #fbf6ed;
+    --line: #e7dbc7;
+    --title: #3a3125;
+    --muted: #9c8e79;
+    --name: #7d6f5b;
+    --bubble: #fffdf8;
+    --bubble-text: #3a3227;
+    --mine: #e9dcc2;
+    --mine-text: #40372a;
+    --accent: #c08a4a;
+    --tag-bg: #f3e7d3;
+    --tag-text: #99703c;
+    --note-bg: #fffdf8;
+    --shadow: rgba(80, 60, 30, 0.08);
+  }
+
+  /* 顶栏和页脚整幅横贯，里面的内容居中收窄。
+     渲染服务的画布宽度不可控（常见 800 / 1280），收窄之后宽画布上也不会
+     出现「气泡挤在左边、右边一大片空」的观感。 */
+  .wrap { width: 100%; max-width: 880px; margin: 0 auto; }
 
   /* ---------- 顶栏：像聊天窗口的标题栏 ---------- */
   .bar {
-    display: flex; align-items: center; gap: 12px;
-    padding: 16px 20px;
-    background: #f7f8fc;
-    border-bottom: 1px solid #ebedf4;
+    padding: 15px 22px;
+    background: var(--bar);
+    border-bottom: 1px solid var(--line);
   }
-  body.theme-midnight .bar { background: #1c2231; border-bottom-color: #262e42; }
-  body.theme-paper .bar { background: #f7f1e7; border-bottom-color: #ece0cf; }
-
+  .bar .wrap {
+    display: flex; align-items: center; gap: 12px;
+  }
   .bar-icon {
-    width: 40px; height: 40px; flex: 0 0 40px;
+    position: relative; overflow: hidden;
+    width: 42px; height: 42px; flex: 0 0 42px;
     border-radius: 13px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 17px; font-weight: 700; color: #fff;
-    background: linear-gradient(135deg, #6a5cff, #33b1ff);
+    font-size: 18px; font-weight: 700; color: #fff;
+    background: var(--accent);
   }
   .bar-text { min-width: 0; }
   .bar-title {
-    font-size: 15.5px; font-weight: 700; color: #23283a;
+    font-size: 16px; font-weight: 700; color: var(--title);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  .bar-sub { margin-top: 2px; font-size: 11.5px; color: #8d94ab; }
-  body.theme-midnight .bar-title { color: #eaeefa; }
-  body.theme-midnight .bar-sub { color: #7b86a4; }
+  .bar-sub { margin-top: 3px; font-size: 12px; color: var(--muted); }
   .bar-tag {
     margin-left: auto; flex: 0 0 auto;
-    padding: 5px 11px; border-radius: 999px;
-    font-size: 11px; font-weight: 600; white-space: nowrap;
-    color: #5a5fd6; background: #eceafe;
+    padding: 5px 12px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 600; white-space: nowrap;
+    color: var(--tag-text); background: var(--tag-bg);
   }
-  body.theme-midnight .bar-tag { color: #a6b0ff; background: #262c46; }
 
   /* ---------- 说明行：只有骚扰上报和群事件用得到 ---------- */
+  .note-wrap { padding: 16px 22px 0; }
   .note {
-    margin: 16px 20px 0;
-    padding: 11px 14px; border-radius: 12px;
-    font-size: 13px; line-height: 1.65; color: #2c3040;
-    background: #f4f6fb; border-left: 3px solid #6a5cff;
+    padding: 12px 15px; border-radius: 12px;
+    font-size: 13.5px; line-height: 1.66; color: var(--bubble-text);
+    background: var(--note-bg); border-left: 3px solid var(--accent);
+    box-shadow: 0 1px 3px var(--shadow);
     white-space: pre-wrap; word-break: break-word;
   }
-  body.theme-midnight .note { background: #1f2637; color: #dbe2f2; border-left-color: #7c8cff; }
-  body.theme-paper .note { background: #faf3e8; border-left-color: #c89b5a; }
 
   /* ---------- 聊天区 ---------- */
-  .chat { padding: 16px 20px 4px; }
-  .row { display: flex; gap: 9px; margin-bottom: 13px; align-items: flex-start; }
+  .chat { padding: 16px 22px 6px; }
+  .row { display: flex; gap: 10px; margin-bottom: 14px; align-items: flex-start; }
   .row.right { flex-direction: row-reverse; }
 
   .face {
-    width: 30px; height: 30px; flex: 0 0 30px;
+    position: relative; overflow: hidden;
+    width: 34px; height: 34px; flex: 0 0 34px;
     border-radius: 50%;
     display: flex; align-items: center; justify-content: center;
-    font-size: 13px; font-weight: 700; color: #fff;
-    letter-spacing: 0;
+    font-size: 14px; font-weight: 700; color: #fff;
   }
-  .stack { min-width: 0; max-width: 78%; }
+  /* 真头像盖在彩色首字块上面。拉不到就自己隐藏，露出下面的首字块。 */
+  .face img, .bar-icon img {
+    position: absolute; left: 0; top: 0;
+    width: 100%; height: 100%; object-fit: cover;
+  }
+
+  .stack { min-width: 0; max-width: min(74%, 620px); }
   .row.right .stack { display: flex; flex-direction: column; align-items: flex-end; }
 
   .who {
-    display: flex; gap: 7px; align-items: baseline;
-    margin: 0 2px 4px; font-size: 11px; color: #8d94ab;
+    display: flex; gap: 8px; align-items: baseline;
+    margin: 0 2px 5px; font-size: 11.5px; color: var(--muted);
   }
   .row.right .who { flex-direction: row-reverse; }
-  .who b { font-weight: 600; color: #6c7590; }
-  body.theme-midnight .who { color: #6f7a97; }
-  body.theme-midnight .who b { color: #97a3c4; }
+  .who b { font-weight: 600; color: var(--name); }
 
   .bubble {
     padding: 9px 13px;
     border-radius: 4px 14px 14px 14px;
-    font-size: 13.5px; line-height: 1.68;
-    background: #f1f3f8; color: #2b2f3d;
+    font-size: 14px; line-height: 1.66;
+    background: var(--bubble); color: var(--bubble-text);
+    box-shadow: 0 1px 3px var(--shadow);
     white-space: pre-wrap; word-break: break-word;
   }
   .row.right .bubble {
     border-radius: 14px 4px 14px 14px;
-    background: #dfe8ff; color: #23305c;
+    background: var(--mine); color: var(--mine-text);
   }
-  body.theme-midnight .bubble { background: #222a3c; color: #dfe5f4; }
-  body.theme-midnight .row.right .bubble { background: #2d3d64; color: #dce6ff; }
-  body.theme-paper .bubble { background: #f4efe6; color: #3a3227; }
-  body.theme-paper .row.right .bubble { background: #e7dcc6; color: #40372a; }
 
   .empty {
-    margin: 4px 0 12px;
-    padding: 18px; border-radius: 12px; font-size: 12.5px;
-    color: #9aa0b4; background: #f7f8fc; text-align: center;
+    margin: 4px 0 14px;
+    padding: 20px; border-radius: 12px; font-size: 13px;
+    color: var(--muted); background: var(--bubble); text-align: center;
+    box-shadow: 0 1px 3px var(--shadow);
   }
-  body.theme-midnight .empty { background: #1e2434; }
 
   /* ---------- 页脚 ---------- */
   .footer {
-    padding: 12px 20px 15px;
-    display: flex; align-items: center; gap: 10px;
-    font-size: 11px; color: #a2a8bb;
-    border-top: 1px solid #eef0f6;
+    padding: 12px 22px 14px;
+    font-size: 11.5px; color: var(--muted);
+    border-top: 1px solid var(--line);
   }
-  body.theme-midnight .footer { color: #6f7893; border-top-color: #232b3d; }
-  body.theme-paper .footer { border-top-color: #ece0cf; }
+  .footer .wrap { display: flex; align-items: center; gap: 10px; }
   .footer .spacer { margin-left: auto; }
 </style>
 </head>
 <body class="theme-{{ theme }}">
-  <div class="card">
-    <div class="bar">
-      <div class="bar-icon">{{ icon }}</div>
+  <div class="bar">
+    <div class="wrap">
+      <div class="bar-icon">{{ icon }}{% if avatar %}<img src="{{ avatar }}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" />{% endif %}</div>
       <div class="bar-text">
         <div class="bar-title">{{ title }}</div>
         {% if subtitle %}<div class="bar-sub">{{ subtitle }}</div>{% endif %}
       </div>
       {% if tag %}<div class="bar-tag">{{ tag }}</div>{% endif %}
     </div>
+  </div>
 
-    {% if note %}<div class="note">{{ note }}</div>{% endif %}
+  {% if note %}<div class="note-wrap"><div class="wrap"><div class="note">{{ note }}</div></div></div>{% endif %}
 
-    <div class="chat">
+  <div class="chat">
+    <div class="wrap">
       {% for msg in messages %}
       <div class="row {% if msg.side == 'right' %}right{% endif %}">
-        {% if show_avatar %}<div class="face" style="background: {{ msg.color }}">{{ msg.initial }}</div>{% endif %}
+        {% if show_avatar %}<div class="face" style="background: {{ msg.color }}">{{ msg.initial }}{% if msg.avatar %}<img src="{{ msg.avatar }}" alt="" referrerpolicy="no-referrer" onerror="this.style.display='none'" />{% endif %}</div>{% endif %}
         <div class="stack">
           <div class="who"><b>{{ msg.name }}</b>{% if msg.time %}<span>{{ msg.time }}</span>{% endif %}</div>
           <div class="bubble">{{ msg.text }}</div>
@@ -153,8 +197,10 @@
       {% endfor %}
       {% if not messages %}<div class="empty">{{ empty_hint }}</div>{% endif %}
     </div>
+  </div>
 
-    <div class="footer">
+  <div class="footer">
+    <div class="wrap">
       <div>{{ footer }}</div>
       <div class="spacer">{{ generated_at }}</div>
     </div>

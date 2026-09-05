@@ -9,7 +9,7 @@
 帮群友传话、被骚扰时告状、被禁言被踢时汇报 —— 全都用它自己的口吻说，
 还会带上一张最近群聊记录的卡片。
 
-[![版本](https://img.shields.io/badge/version-2.1.0-4c8dff.svg)](https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter/releases)
+[![版本](https://img.shields.io/badge/version-2.1.1-5566f5.svg)](https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter/releases)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.16%2C%3C5-8b5cf6.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![平台](https://img.shields.io/badge/platform-OneBot%20v11%20%7C%20%E5%85%B6%E4%BB%96-06b6d4.svg)](#平台兼容性)
@@ -177,16 +177,21 @@ Bot 每天要接住各种消息，其中总有一些是纯粹的攻击、纠缠�
 拿不到接口时才退回 AstrBot 的会话上下文 —— 那种情况下分不清群里具体是谁在说话，
 观感会差一些，但至少还有上下文。
 
+卡片是整幅铺满的，没有多余的边框和背景色块，就是一张聊天窗口的截图。
+群头像、群友头像默认拉真实的 QQ 头像（`q.qlogo.cn`），拉不到就自动退回彩色首字块，
+不影响卡片出图。不想让渲染服务去请求头像的话，把「使用真实 QQ 头像」关掉即可。
+
 三套配色：
 
 | 主题 | 风格 |
 | --- | --- |
-| `aurora` 极光（默认） | 青紫渐变，适合大多数场景 |
+| `aurora` 清爽（默认） | 浅色蓝白，像平时的聊天窗口 |
 | `midnight` 午夜 | 深色低亮，夜里看不刺眼 |
-| `paper` 纸张 | 浅色高对比，截图转发最清楚 |
+| `paper` 纸张 | 暖色护眼，长段文字读起来舒服 |
 
 > 卡片只是锦上添花。渲染失败会自动把几句原文贴在正文后面，消息该到的还是会到。
 > 连续失败 3 次会静音卡片 10 分钟，免得每次上报都白等一次渲染超时，之后自动恢复。
+
 ---
 
 ## 安装
@@ -428,11 +433,11 @@ Bot 到底能做什么、以及它写进去的东西会原样发给你。
 | 骚扰上报使用卡片 | 开 | |
 | 传话时使用卡片 | 开 | |
 | 群事件小报告使用卡片 | 开 | |
-| 卡片配色 | 极光 | 极光 `aurora` / 午夜 `midnight` / 纸张 `paper` |
+| 卡片配色 | 清爽 | 清爽 `aurora` / 午夜 `midnight` / 纸张 `paper` |
 | 卡片最多展示几条消息 | 14 | 范围 1–60 |
-| 卡片宽度 | 720 px | 范围 480–1200 |
+| 使用真实 QQ 头像 | 开 | 关掉之后统一用彩色首字块，卡片不会去外部拉头像 |
 | 显示每条消息的时间 | 开 | 只有能拿到时间戳的来源才会显示 |
-| 显示头像色块 | 开 | 按发送者取一个固定颜色的圆点，关掉之后卡片更紧凑 |
+| 显示头像 | 开 | 关掉之后卡片更紧凑，只剩昵称和气泡 |
 
 > 卡片永远是「先发文本，再附图片」，所以你收到的文字始终可以复制。
 

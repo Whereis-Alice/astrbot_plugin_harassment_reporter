@@ -75,7 +75,7 @@ KEY_GROUPS: dict[str, str] = {
     "card_for_notice": "card",
     "card_theme": "card",
     "card_max_messages": "card",
-    "card_width": "card",
+    "card_use_real_avatar": "card",
     "card_show_time": "card",
     "card_show_avatar": "card",
     # 高级与调试
@@ -471,8 +471,9 @@ class Settings:
         return self._int("card_max_messages", 14, 1, 60)
 
     @property
-    def card_width(self) -> int:
-        return self._int("card_width", 720, 480, 1200)
+    def card_use_real_avatar(self) -> bool:
+        """用群友和群的真实 QQ 头像，拉不到时自动退回彩色首字块。"""
+        return self._bool("card_use_real_avatar", True)
 
     @property
     def card_show_time(self) -> bool:
@@ -481,5 +482,5 @@ class Settings:
 
     @property
     def card_show_avatar(self) -> bool:
-        """显示圆形头像占位块，关掉会更紧凑。"""
+        """显示圆形头像，关掉会更紧凑。"""
         return self._bool("card_show_avatar", True)

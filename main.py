@@ -553,13 +553,14 @@ class HarassmentReporterPlugin(star.Star):
             "",
             "— 聊天卡片 —",
             "状态：" + _switch(settings.card_enabled)
-            + "（主题 " + settings.card_theme + " ｜ 宽 " + str(settings.card_width)
+            + "（主题 " + settings.card_theme
             + " ｜ 最多 " + str(settings.card_max_messages) + " 条）",
             "适用：骚扰 " + _yes(settings.card_for_harassment)
             + " ｜ 反馈 " + _yes(settings.card_for_feedback)
             + " ｜ 群事件 " + _yes(settings.card_for_notice),
             "显示时间 " + _yes(settings.card_show_time)
-            + " ｜ 显示头像 " + _yes(settings.card_show_avatar),
+            + " ｜ 显示头像 " + _yes(settings.card_show_avatar)
+            + " ｜ 真实 QQ 头像 " + _yes(settings.card_use_real_avatar),
             "渲染服务：" + ("暂时熔断中（会自动恢复）" if self.card.muted else "正常"),
             "",
             "— 观察名单 —",

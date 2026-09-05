@@ -431,9 +431,9 @@
           "paper"
         ],
         "labels": [
-          "极光（青紫渐变）",
+          "清爽（浅色蓝白）",
           "午夜（深色低亮）",
-          "纸张（浅色高对比）"
+          "纸张（暖色护眼）"
         ],
         "condition": {
           "enable_card_report": true
@@ -449,12 +449,11 @@
           "enable_card_report": true
         }
       },
-      "card_width": {
-        "type": "int",
-        "description": "卡片宽度（像素）",
-        "default": 720,
-        "min": 480,
-        "max": 1200,
+      "card_use_real_avatar": {
+        "type": "bool",
+        "description": "使用真实 QQ 头像",
+        "default": true,
+        "hint": "卡片上显示群友和群的真实头像（仅 QQ / OneBot 平台）。头像由渲染服务去 q.qlogo.cn 拉取，若你使用的是公共文转图服务、又不希望它接触到 QQ 号，可关掉改用彩色首字块；拉取失败也会自动退回首字块",
         "condition": {
           "enable_card_report": true
         }
@@ -470,9 +469,9 @@
       },
       "card_show_avatar": {
         "type": "bool",
-        "description": "显示头像色块",
+        "description": "显示头像",
         "default": true,
-        "hint": "按发送者取一个固定颜色的圆形色块，关掉之后卡片更紧凑",
+        "hint": "关掉之后卡片更紧凑，只剩昵称和气泡",
         "condition": {
           "enable_card_report": true
         }
@@ -823,7 +822,7 @@
   },
   "card_width": {
     "type": "int",
-    "description": "（旧版字段，已迁移到「聊天记录卡片」分组）卡片宽度（像素）",
+    "description": "（2.1.1 起不再使用）卡片改为整幅铺满，不再固定宽度",
     "default": 720,
     "invisible": true
   },

@@ -5,7 +5,14 @@ from typing import Any, Protocol
 
 from .text import clean_text, truncate
 
-WATCHLIST_STORAGE_KEY = "watchlist_v1"
+# 观察名单的统计字段（上报次数、最后时间等）。
+# 1.x 曾把整份名单存在 watchlist_v1 里，2.0 起可编辑字段搬进了插件配置，
+# 但统计字段一直沿用同一个 key —— 于是「旧名单」和「新统计」变得无法区分，
+# 名单在 WebUI 里被删空后又会被统计数据重新灌回配置（2.1.1 修复）。
+# 现在统计单独存一个 key，watchlist_v1 只作为一次性的旧数据来源读取。
+WATCHLIST_META_KEY = "watchlist_meta_v1"
+WATCHLIST_LEGACY_KEY = "watchlist_v1"
+WATCHLIST_MIGRATED_KEY = "watchlist_migrated_v1"
 WARN_CACHE_STORAGE_KEY = "warned_sessions_v1"
 COOLDOWN_STORAGE_KEY = "report_cooldown_v1"
 RATE_STORAGE_KEY = "rate_counter_v1"
@@ -54,16 +61,34 @@ class Store:
             pass
 
     # ------------------------------------------------------------------
-    # 观察名单元数据（可编辑字段存在配置里，统计字段存在这里）
+    # 观察名单（可编辑字段存在插件配置里，统计字段存在这里）
     # ------------------------------------------------------------------
     async def get_watchlist_meta(self) -> dict[str, Any]:
-        return await self._get_dict(WATCHLIST_STORAGE_KEY)
+        return await self._get_dict(WATCHLIST_META_KEY)
 
     async def put_watchlist_meta(self, meta: dict[str, Any]) -> None:
-        await self._put(WATCHLIST_STORAGE_KEY, meta)
+        await self._put(WATCHLIST_META_KEY, meta)
 
     async def get_legacy_watchlist(self) -> dict[str, Any]:
-        return await self._get_dict(WATCHLIST_STORAGE_KEY)
+        """读 1.x 遗留的整份名单。只在迁移标记还没置位时读一次。"""
+        return await self._get_dict(WATCHLIST_LEGACY_KEY)
+
+    async def drop_legacy_watchlist(self) -> None:
+        """迁移完成后删掉旧 key，免得它以后又被当成名单读回来。"""
+        try:
+            await self._host.delete_kv_data(WATCHLIST_LEGACY_KEY)
+        except Exception:
+            pass
+
+    async def watchlist_migrated(self) -> bool:
+        """名单是否已经完成迁移。置位之后，插件配置就是唯一真源。"""
+        try:
+            return bool(await self._host.get_kv_data(WATCHLIST_MIGRATED_KEY, False))
+        except Exception:
+            return False
+
+    async def mark_watchlist_migrated(self) -> None:
+        await self._put(WATCHLIST_MIGRATED_KEY, True)
 
     # ------------------------------------------------------------------
     # 已警告记录（先警告再上报策略用）

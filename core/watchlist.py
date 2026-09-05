@@ -8,6 +8,9 @@ from .text import clean_text, format_ts, truncate
 TEMPLATE_KEY = "watch_target"
 NOTE_LIMIT = 200
 
+# 只有 1.x 的完整名单条目才带这些字段；2.0/2.1 的统计数据没有，靠它们区分。
+IDENTITY_FIELDS = ("sender_id", "sender_name", "platform_id")
+
 
 class Watchlist:
     """观察名单管理。
@@ -101,43 +104,119 @@ class Watchlist:
     # 启动迁移
     # ------------------------------------------------------------------
     async def migrate(self) -> None:
-        """把旧版本只存在键值库里的名单搬到配置里，只需要执行一次。"""
+        """把 1.x 只存在键值库里的名单搬进插件配置，全生命周期只做一次。
+
+        这里必须靠一个持久化的「已迁移」标记来判断，不能靠「配置里有没有条目」：
+        AstrBot 每次保存插件配置都会热重载插件，也就会再跑一次本方法。若用
+        「配置为空 = 还没迁移」来判断，管理员在 WebUI 里把名单删空并保存后，
+        这里就会去读键值库，把统计数据当成旧名单重新灌回配置 —— 表现就是
+        条目删不掉、一刷新又长回来（2.1.1 修复）。
+        """
         if not self._settings.available:
             return
 
-        rows = self._config_rows()
-        if rows:
-            normalized = {}
-            for raw_row in rows:
-                row = self._normalize_row(raw_row)
-                if row is None:
-                    continue
-                key = row.pop("key")
-                normalized[key] = row
-            if normalized:
-                self._save_config(normalized)
+        if await self._store.watchlist_migrated():
+            # 迁移早已完成：插件配置就是唯一真源，这里只顺手清掉已删条目的统计残渣。
+            await self._prune_meta()
             self._clear_legacy_snapshot()
             return
 
-        legacy = await self._store.get_legacy_watchlist()
-        if not legacy:
-            self._clear_legacy_snapshot()
-            return
+        normalized: dict[str, dict[str, Any]] = {}
+        for raw_row in self._config_rows():
+            row = self._normalize_row(raw_row)
+            if row is None:
+                continue
+            key = row.pop("key")
+            normalized[key] = row
 
-        migrated: dict[str, dict[str, Any]] = {}
+        legacy = await self._safe_legacy()
+        if not normalized:
+            normalized = self._legacy_entries(legacy)
+        if normalized:
+            self._save_config(normalized)
+        await self._seed_meta(legacy, normalized)
+
+        await self._store.mark_watchlist_migrated()
+        await self._store.drop_legacy_watchlist()
+        await self._prune_meta()
+        self._clear_legacy_snapshot()
+
+    async def _safe_legacy(self) -> dict[str, Any]:
+        try:
+            legacy = await self._store.get_legacy_watchlist()
+        except Exception:
+            return {}
+        return legacy if isinstance(legacy, dict) else {}
+
+    @staticmethod
+    def _legacy_entries(legacy: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        """从旧键值库里挑出真正的名单条目。
+
+        旧 key 里可能混着两种东西：1.x 的完整名单（带用户身份），以及 2.0/2.1
+        的统计数据（只有次数、时间这些）。只认带身份字段的，另一种直接丢掉。
+        """
+        entries: dict[str, dict[str, Any]] = {}
         for key, entry in legacy.items():
             if not isinstance(entry, dict):
                 continue
-            migrated[str(key)] = {
+            if not any(clean_text(entry.get(field)) for field in IDENTITY_FIELDS):
+                continue
+            entries[str(key)] = {
                 "sender_id": clean_text(entry.get("sender_id"), "unknown"),
                 "sender_name": clean_text(entry.get("sender_name"), "未知用户"),
                 "platform_id": clean_text(entry.get("platform_id"), "unknown"),
                 "note": truncate(clean_text(entry.get("last_reason")), NOTE_LIMIT),
                 "enabled": True,
             }
-        if migrated:
-            self._save_config(migrated)
-        self._clear_legacy_snapshot()
+        return entries
+
+    async def _seed_meta(
+        self,
+        legacy: dict[str, Any],
+        keep: dict[str, dict[str, Any]],
+    ) -> None:
+        """把旧 key 里的统计数据搬到新 key，别让老用户的上报次数归零。"""
+        if not legacy or not keep:
+            return
+        meta = await self._store.get_watchlist_meta()
+        changed = False
+        for key in keep:
+            entry = legacy.get(key)
+            if key in meta or not isinstance(entry, dict):
+                continue
+            if not _as_int(entry.get("report_count")) and not _as_float(
+                entry.get("last_reported_at")
+            ):
+                continue
+            meta[key] = {
+                "group_id": clean_text(entry.get("group_id")),
+                "last_session_id": clean_text(entry.get("last_session_id")),
+                "first_reported_at": _as_float(entry.get("first_reported_at")),
+                "last_reported_at": _as_float(entry.get("last_reported_at")),
+                "report_count": _as_int(entry.get("report_count")),
+                "last_reason": truncate(clean_text(entry.get("last_reason")), NOTE_LIMIT),
+                "last_severity": clean_text(entry.get("last_severity"), "unknown"),
+            }
+            changed = True
+        if changed:
+            await self._store.put_watchlist_meta(meta)
+
+    async def _prune_meta(self) -> None:
+        """删掉配置里已不存在的条目留下的统计数据。
+
+        不清的话，管理员刚把某人移出名单、对方又被重新上报时，会捡回上一轮的
+        次数和时间，看起来像是「删了但没删干净」。
+        """
+        try:
+            meta = await self._store.get_watchlist_meta()
+        except Exception:
+            return
+        if not meta:
+            return
+        alive = set(self._config_to_dict())
+        kept = {key: value for key, value in meta.items() if key in alive}
+        if len(kept) != len(meta):
+            await self._store.put_watchlist_meta(kept)
 
     def _clear_legacy_snapshot(self) -> None:
         if self._settings.get("watchlist_snapshot") not in (None, ""):

@@ -24,8 +24,8 @@ TEMPLATE_FILE = Path(__file__).resolve().parent.parent / "templates" / "chat_car
 FAILURE_THRESHOLD = 3
 COOLDOWN_AFTER_FAILURE = 600
 
-# 头像底色。按发送者取一个稳定的颜色，同一个人每次都是同一色，
-# 这样一眼就能看出「谁在说话」。
+# 头像兜底底色。拿不到真实 QQ 头像时（其它平台、非数字 ID、图片加载失败）
+# 就画一个彩色首字块；同一个人每次都是同一色，一眼能看出谁在说话。
 AVATAR_COLORS = (
     "#6a5cff",
     "#ff7a59",
@@ -124,6 +124,7 @@ class CardRenderer:
                     "color": _avatar_color(seed),
                     "time": (format_ts(stamp, "%H:%M") if (show_time and stamp) else ""),
                     "text": _plain(line.get("text"), text_limit) or "[空消息]",
+                    "avatar": clean_text(line.get("avatar")),
                 }
             )
         return messages
@@ -138,6 +139,7 @@ class CardRenderer:
         title: str,
         subtitle: str = "",
         icon: str = "",
+        avatar: str = "",
         tag: str = "",
         note: str = "",
         messages: list[dict[str, str]] | None = None,
@@ -151,8 +153,8 @@ class CardRenderer:
         clean_title = _plain(title, 40) or "聊天记录"
         data = {
             "theme": self._settings.card_theme,
-            "card_width": self._settings.card_width,
             "icon": _plain(icon, 2) or _initial(clean_title),
+            "avatar": clean_text(avatar),
             "title": clean_title,
             "subtitle": _plain(subtitle, 90),
             "tag": _plain(tag, 16),
@@ -218,6 +220,7 @@ class CardRenderer:
             kind=kind,
             title=chatlog.title,
             subtitle=chatlog.subtitle,
+            avatar=getattr(chatlog, "group_avatar", ""),
             tag=tag,
             note=note,
             messages=self.build_messages(

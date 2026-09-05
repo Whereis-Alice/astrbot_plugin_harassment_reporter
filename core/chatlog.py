@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .eventinfo import group_id, message_text, platform_id, self_id, sender_id, sender_name
-from .onebot import ChatLine, get_client, is_onebot_event
+from .onebot import ChatLine, get_client, is_onebot_event, qq_group_avatar, qq_user_avatar
 from .text import clean_text, relative_time, truncate
 
 LOG_PREFIX = "[HarassmentReporter]"
@@ -43,6 +43,7 @@ class ChatLog:
     subtitle: str = ""
     group_id: str = ""
     group_name: str = ""
+    group_avatar: str = ""
     source: str = SOURCE_EMPTY
 
     @property
@@ -111,6 +112,7 @@ class ChatLogCollector:
         if include_current:
             self._append_current(event, log)
 
+        self._attach_avatars(event, log)
         self._label(event, log)
         return log
 
@@ -211,6 +213,24 @@ class ChatLogCollector:
             log.source = SOURCE_CURRENT
 
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # 头像
+    # ------------------------------------------------------------------
+    def _attach_avatars(self, event: Any, log: ChatLog) -> None:
+        """给每条发言和卡片头部挂上真实 QQ 头像地址。
+
+        只在 OneBot 平台上做，因为只有 QQ 有公开的头像地址可以直接拼。
+        拼不出来的（非数字 ID、其它平台）留空，卡片会自动画彩色首字块。
+        """
+        if not self.settings.card_use_real_avatar or not is_onebot_event(event):
+            return
+        for line in log.lines:
+            if not line.avatar:
+                line.avatar = qq_user_avatar(line.sender_id)
+        log.group_avatar = (
+            qq_group_avatar(log.group_id) if log.group_id else qq_user_avatar(sender_id(event))
+        )
+
     # 卡片头部文案
     # ------------------------------------------------------------------
     @staticmethod
