@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from astrbot.api import logger
@@ -41,6 +42,32 @@ REPLY_CHANNEL = "feedback_reply"
 
 # 模型偶尔会把 message 漏成空串，这时至少让主人知道「有人找过你」。
 FALLBACK_BODY = "有人找你，但我没能把话记全。"
+
+
+@dataclass
+class RelayOutcome:
+    """一次传话的完整结果。
+
+    只带一个 Delivery 是不够的：工具返回给模型的那句话里会提到「聊天记录也附上了」，
+    而记录到底附没附取决于开关有没有开、群历史拉没拉到、卡片画没画出来。
+    这两个标记就是为了让那句话说的是实话 —— 宁可不提，也不能凭空承诺。
+    """
+
+    delivery: Delivery
+    chatlog_attached: bool = False   # 真的附上了那张聊天记录卡片
+    chatlog_inlined: bool = False    # 卡片没画出来，改成把几句原文贴在正文后面
+
+    @property
+    def ok(self) -> bool:
+        return self.delivery.ok
+
+    @property
+    def status(self) -> str:
+        return self.delivery.status
+
+    @property
+    def detail(self) -> str:
+        return self.delivery.detail
 
 
 class FeedbackService:
@@ -97,16 +124,31 @@ class FeedbackService:
         event: Any,
         message: str,
         ignore_limits: bool = False,
-    ) -> Delivery:
+    ) -> RelayOutcome:
         """把模型写好的一句话带给主人，附带最近群聊记录卡片。"""
         settings = self.settings
         if not settings.enabled or not settings.feedback_enabled:
-            return Delivery(STATUS_DISABLED, "反馈转达功能当前没有开启。")
+            return RelayOutcome(Delivery(STATUS_DISABLED, "反馈转达功能当前没有开启。"))
         if not settings.feedback_session_id:
-            return Delivery(
-                STATUS_UNCONFIGURED,
-                "还没有绑定反馈接收会话。请在目标会话执行 /hr_bind，或单独配置 feedback_session_id。",
+            return RelayOutcome(
+                Delivery(
+                    STATUS_UNCONFIGURED,
+                    "还没有绑定反馈接收会话。请在目标会话执行 /hr_bind，或单独配置 feedback_session_id。",
+                )
             )
+
+        # 拉群历史要走一次协议端请求，画卡片要开一次无头浏览器，都不便宜。
+        # 冷却期内每来一次工具调用都白干一轮，所以先问投递口发不发得出去。
+        blocked = await self.outbox.precheck(
+            channel=CHANNEL,
+            target_session_id=settings.feedback_session_id,
+            source_session_id=session_id(event),
+            cooldown=settings.feedback_cooldown_seconds,
+            hourly_limit=settings.feedback_hourly_limit,
+            ignore_limits=ignore_limits,
+        )
+        if blocked is not None:
+            return RelayOutcome(blocked)
 
         body = clean_text(message) or clean_text(message_text(event)) or FALLBACK_BODY
 
@@ -125,6 +167,7 @@ class FeedbackService:
             text = body + "\n\n" + self._footnote(event, group_name)
 
         image_path = None
+        inlined = False
         if chatlog is not None and not chatlog.empty:
             image_path = await self.card.render_chatlog(
                 chatlog,
@@ -137,6 +180,7 @@ class FeedbackService:
                 fallback = chatlog.as_text()
                 if fallback:
                     text = text + "\n\n最近的聊天记录：\n" + fallback
+                    inlined = True
 
         delivery = await self.outbox.deliver(
             channel=CHANNEL,
@@ -148,8 +192,13 @@ class FeedbackService:
             hourly_limit=settings.feedback_hourly_limit,
             ignore_limits=ignore_limits,
         )
+        outcome = RelayOutcome(
+            delivery,
+            chatlog_attached=bool(image_path),
+            chatlog_inlined=inlined,
+        )
         if not delivery.ok:
-            return delivery
+            return outcome
 
         await self.store.add_contact(
             {
@@ -174,7 +223,7 @@ class FeedbackService:
             session_id(event),
             "无" if chatlog is None else chatlog.source,
         )
-        return delivery
+        return outcome
 
     # ------------------------------------------------------------------
     # 工具编排
@@ -207,11 +256,20 @@ class FeedbackService:
                     "不要提到工具调用，也不要假装已经转达。"
                 )
 
-        delivery = await self.relay(event=event, message=message)
+        outcome = await self.relay(event=event, message=message)
+        delivery = outcome.delivery
 
         if delivery.ok:
+            # 记录到底附没附，取决于开关、群历史和卡片渲染三件事，
+            # 这里只能照实说 —— 不然模型会跟用户保证一张根本不存在的截图。
+            if outcome.chatlog_attached:
+                attachment = "，最近的群聊记录也一起附上了"
+            elif outcome.chatlog_inlined:
+                attachment = "，最近几句聊天记录也跟在后面了"
+            else:
+                attachment = ""
             return (
-                "话已经带到" + receiver + "那边了，最近的群聊记录也一起附上了。"
+                "话已经带到" + receiver + "那边了" + attachment + "。"
                 "请用你自己的口吻自然地告诉用户你已经帮他去说了，让他等" + receiver + "有空再回。"
                 "不要提到工具调用，也不要念出这段提示。"
             )

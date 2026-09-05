@@ -17,8 +17,13 @@ ONEBOT_PLATFORM_NAMES = {"aiocqhttp"}
 # 同时写入两套键在实测中兼容性最好。
 FORWARD_NODE_ALIASES = True
 
-# 合并转发连续失败多少次后，才在本次运行里停用它并退回纯文本。
-FORWARD_FAILURE_LIMIT = 3
+# 一个接口连续失败多少次后，才认定「这个协议端真的不支持」并在本次运行里不再尝试。
+# 用连续失败计数而不是一次失败就下结论：网络抖动、协议端重启、临时风控都会
+# 造成偶发失败，一次就把能力标成不支持，整个运行周期都会白白降级。
+FAILURE_LIMIT = 3
+
+# 兼容旧名字：合并转发原本单独有一个阈值，现在和其它能力共用同一个。
+FORWARD_FAILURE_LIMIT = FAILURE_LIMIT
 
 
 @dataclass
@@ -53,9 +58,23 @@ class OneBotCapability:
     forward_supported: bool = True
     forward_failures: int = 0
     failures: dict[str, int] = field(default_factory=dict)
+    strikes: dict[str, int] = field(default_factory=dict)
 
     def note_failure(self, action: str) -> None:
         self.failures[action] = self.failures.get(action, 0) + 1
+
+    def strike(self, name: str) -> bool:
+        """给某个能力记一次失败，连续失败到阈值时返回 True。
+
+        返回 True 才代表可以下「这个协议端不支持」的结论；在那之前每次都还会
+        再试一遍，所以一次偶发失败不会让能力被永久关掉，网络恢复后自动痊愈。
+        """
+        self.strikes[name] = self.strikes.get(name, 0) + 1
+        return self.strikes[name] >= FAILURE_LIMIT
+
+    def clear_strike(self, name: str) -> None:
+        """调用成功了，把这个能力的连续失败计数归零。"""
+        self.strikes.pop(name, None)
 
     def note_forward_result(self, ok: bool) -> None:
         """合并转发的失败判定。
@@ -65,9 +84,10 @@ class OneBotCapability:
         """
         if ok:
             self.forward_failures = 0
+            self.clear_strike("forward")
             return
         self.forward_failures += 1
-        if self.forward_failures >= FORWARD_FAILURE_LIMIT:
+        if self.strike("forward"):
             self.forward_supported = False
 
 
@@ -297,7 +317,12 @@ class OneBotBridge:
             )
             if result is None:
                 # 有的实现不认 count 参数，退回不带参数的调用。
-                self.capability.history_supports_count = False
+                # 连续失败到阈值才真的放弃 count —— 不然一次网络抖动之后，
+                # 这个运行周期里就只能拿协议端默认的那几条了。
+                if self.capability.strike("group_history_count"):
+                    self.capability.history_supports_count = False
+            else:
+                self.capability.clear_strike("group_history_count")
         if result is None:
             result = await self.call(client, "get_group_msg_history", group_id=group_arg)
         if result is None:
@@ -325,7 +350,8 @@ class OneBotBridge:
         """拉取私聊历史消息。
 
         get_friend_msg_history 不在 OneBot v11 标准里，只有 NapCat、LLOneBot 等
-        扩展实现提供，所以第一次调用失败后就记下来不再重试。
+        扩展实现提供。连续失败到阈值才认定当前协议端没有这个接口并停止重试，
+        这样偶发的一次失败不会让整个运行周期都拿不到私聊记录。
         """
         uid = clean_text(user_id)
         if not uid or client is None or not self.capability.private_history_supported:
@@ -341,12 +367,17 @@ class OneBotBridge:
                 count=max(1, min(100, count)),
             )
             if result is None:
-                self.capability.private_history_supports_count = False
+                if self.capability.strike("private_history_count"):
+                    self.capability.private_history_supports_count = False
+            else:
+                self.capability.clear_strike("private_history_count")
         if result is None:
             result = await self.call(client, "get_friend_msg_history", user_id=user_arg)
         if result is None:
-            self.capability.private_history_supported = False
+            if self.capability.strike("private_history"):
+                self.capability.private_history_supported = False
             return []
+        self.capability.clear_strike("private_history")
 
         messages = self._extract_history_messages(result)
         if not messages:

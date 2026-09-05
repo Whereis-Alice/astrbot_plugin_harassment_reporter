@@ -276,6 +276,17 @@ class NoticeService:
         if not target:
             return Delivery(STATUS_DISABLED, "还没有配置通知接收会话。")
 
+        # 抽群历史、按人格改写、截卡片这三步都要花钱花时间，
+        # 每小时上限已经满了的话就别白干一轮。
+        blocked = await self.outbox.precheck(
+            channel=CHANNEL,
+            target_session_id=target,
+            source_session_id=session_id(event),
+            hourly_limit=settings.notice_hourly_limit,
+        )
+        if blocked is not None:
+            return blocked
+
         group = clean_text(payload["group_id"])
         client = get_client(event)
         group_name = await self.bridge.fetch_group_name(client, group) if group else ""

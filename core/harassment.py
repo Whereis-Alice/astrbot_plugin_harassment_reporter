@@ -268,6 +268,19 @@ class HarassmentService:
         if not settings.enabled:
             return Delivery(STATUS_DISABLED, "上报未执行：插件当前处于关闭状态。")
 
+        # 下面要摘历史、可能还要调一次模型改写、再截一张卡片，都不便宜。
+        # 所以先问投递口一句「现在发得出去吗」，冷却或限流命中就直接掉头。
+        blocked = await self.outbox.precheck(
+            channel=CHANNEL,
+            target_session_id=settings.report_session_id,
+            source_session_id=session_id(event),
+            cooldown=settings.report_cooldown_seconds,
+            hourly_limit=settings.report_hourly_limit,
+            ignore_limits=ignore_limits,
+        )
+        if blocked is not None:
+            return blocked
+
         recent_summary = ""
         if settings.recent_summary_enabled:
             recent_summary = await self.history.summary(

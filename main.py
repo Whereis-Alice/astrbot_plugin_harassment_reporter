@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from astrbot.api import logger, star
@@ -36,8 +37,31 @@ from .core.tools import FeedbackRelayTool, HarassmentReportTool
 from .core.watchlist import Watchlist
 
 LOG_PREFIX = "[HarassmentReporter]"
-PLUGIN_VERSION = "2.1.0"
 REPO_URL = "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter"
+
+
+def _plugin_version(fallback: str = "2.1.3") -> str:
+    """版本号以 metadata.yaml 为准，代码这边只兜底。
+
+    AstrBot 认的是 metadata.yaml；而 @star.register、/hr_status、/hr_help 和启动日志
+    用的是这个常量。以前两处各写一份，改版本时漏掉一边，用户就会看到两个不同的号
+    （2.1.2 就发生过）。现在直接从同一份文件读，想漂也漂不了。
+    """
+    try:
+        text = (Path(__file__).parent / "metadata.yaml").read_text(encoding="utf-8")
+    except Exception:
+        return fallback
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("version:"):
+            continue
+        value = stripped.split(":", 1)[1].strip().strip("\"'")
+        if value:
+            return value
+    return fallback
+
+
+PLUGIN_VERSION = _plugin_version()
 
 MODE_LABELS = {
     "silent": "静默上报（不告诉对方）",
@@ -316,6 +340,12 @@ class HarassmentReporterPlugin(star.Star):
             )
         else:
             proactive = "别人没开口请你传话时，不要主动提这件事。\n"
+        # 关掉附带聊天记录时不能再说「记录会自动附上」，否则模型会以为可以少写，
+        # 结果主人收到一句没有上下文的空话。
+        if settings.feedback_attach_chatlog:
+            chatlog_note = "最近的群聊记录会自动附在这句话后面，所以你不用复述聊天内容。\n"
+        else:
+            chatlog_note = "这次不会附带聊天记录，所以该讲清的来龙去脉都要写在这句话里。\n"
         return (
             "[传话能力提示]\n"
             f"你可以调用 `relay_feedback_to_owner` 工具，直接去找{receiver}说一句话。"
@@ -334,7 +364,7 @@ class HarassmentReporterPlugin(star.Star):
             "说清是谁、在哪儿、遇到了什么。\n"
             f"例如：「星之卡比群的群友A找你呀{receiver}，说是画图插件用不了了」。\n"
             "不要写成工单格式，不要只填关键词，也不要写成冷冰冰的第三人称报告。\n"
-            "最近的群聊记录会自动附在这句话后面，所以你不用复述聊天内容。\n"
+            f"{chatlog_note}"
             "\n"
             "分寸：\n"
             "- 同一个话题不要反复追问；用户说不用了，这一轮就别再提。\n"
@@ -604,19 +634,26 @@ class HarassmentReporterPlugin(star.Star):
         if not self.settings.feedback_session_id:
             yield event.plain_result("还没绑定反馈窗口，先在目标会话里发 /hr_bind 或 /hr_bind_feedback。")
             return
-        delivery = await self.feedback.relay(
+        outcome = await self.feedback.relay(
             event=event,
             message=note or "这是一条 /hr_feedback_test 测试消息，用来确认我能不能找到你。",
             ignore_limits=True,
         )
-        if delivery.ok:
+        if outcome.ok:
+            if outcome.chatlog_attached:
+                attachment = "聊天记录卡片"
+            elif outcome.chatlog_inlined:
+                attachment = "纯文本聊天记录（卡片没画出来）"
+            else:
+                attachment = "无（没拉到群聊记录，或者没开这个开关）"
             yield event.plain_result(
                 "测试消息已发往：\n"
                 + self.settings.feedback_session_id
+                + "\n附件：" + attachment
                 + "\n在那边可以用 /hr_recent 看列表、/hr_back 内容 回话。"
             )
         else:
-            yield event.plain_result("测试消息没发出去：" + delivery.detail)
+            yield event.plain_result("测试消息没发出去：" + outcome.detail)
 
     # ------------------------------------------------------------------
     # 观察名单

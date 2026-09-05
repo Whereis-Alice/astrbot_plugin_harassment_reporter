@@ -9,7 +9,7 @@
 帮群友传话、被骚扰时告状、被禁言被踢时汇报 —— 全都用它自己的口吻说，
 还会带上一张最近群聊记录的卡片。
 
-[![版本](https://img.shields.io/badge/version-2.1.2-5566f5.svg)](https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter/releases)
+[![版本](https://img.shields.io/badge/version-2.1.3-5566f5.svg)](https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter/releases)
 [![AstrBot](https://img.shields.io/badge/AstrBot-%3E%3D4.16%2C%3C5-8b5cf6.svg)](https://github.com/AstrBotDevs/AstrBot)
 [![License](https://img.shields.io/badge/license-MIT-22c55e.svg)](LICENSE)
 [![平台](https://img.shields.io/badge/platform-OneBot%20v11%20%7C%20%E5%85%B6%E4%BB%96-06b6d4.svg)](#平台兼容性)

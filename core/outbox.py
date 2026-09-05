@@ -45,6 +45,56 @@ class Outbox:
         self.settings = settings
         self.card = card
 
+    async def precheck(
+        self,
+        *,
+        channel: str,
+        target_session_id: str,
+        source_session_id: str = "",
+        cooldown: int = 0,
+        hourly_limit: int = 0,
+        ignore_limits: bool = False,
+    ) -> Delivery | None:
+        """先问一句「这条现在发得出去吗」，答案是不行就别再往下折腾。
+
+        三条链路在真正投递之前都要做昂贵的准备工作：调模型改写成人格口吻、
+        走 OneBot 接口拉群历史、开无头浏览器截一张卡片。如果这些都干完了才发现
+        正处在冷却期，那一整轮算力就白烧了。所以调用方应当先问这里。
+
+        返回 None 表示可以继续；返回 Delivery 时，其状态与 deliver() 在同样
+        条件下的返回完全一致，调用方直接 return 即可。deliver() 内部仍会再判一次，
+        这里只是提前挡一道，两处结果保持同一份逻辑。
+        """
+        target = clean_text(target_session_id)
+        if not target:
+            return Delivery(
+                STATUS_UNCONFIGURED,
+                "还没有绑定接收会话。请在目标会话里执行 /hr_bind，或把 /hr_sid 显示的 ID 填进插件配置。",
+            )
+        if ignore_limits:
+            return None
+
+        cooldown_key = clean_text(source_session_id) or target
+
+        if cooldown > 0:
+            remaining = await self.store.cooldown_remaining(channel, cooldown_key, cooldown)
+            if remaining > 0:
+                return Delivery(
+                    STATUS_COOLDOWN,
+                    f"这个会话还在冷却中，剩余约 {convert_duration(remaining)}，本次没有发送。",
+                    remaining,
+                )
+
+        if hourly_limit > 0:
+            limited, used = await self.store.rate_limited(channel, hourly_limit)
+            if limited:
+                return Delivery(
+                    STATUS_RATE_LIMITED,
+                    f"最近一小时已经发了 {used} 条，达到上限 {hourly_limit} 条，本次没有发送。",
+                )
+
+        return None
+
     async def deliver(
         self,
         *,
@@ -68,32 +118,20 @@ class Outbox:
         target = clean_text(target_session_id)
         body = clean_text(text)
 
-        if not target:
-            return Delivery(
-                STATUS_UNCONFIGURED,
-                "还没有绑定接收会话。请在目标会话里执行 /hr_bind，或把 /hr_sid 显示的 ID 填进插件配置。",
-            )
+        blocked = await self.precheck(
+            channel=channel,
+            target_session_id=target,
+            source_session_id=source_session_id,
+            cooldown=cooldown,
+            hourly_limit=hourly_limit,
+            ignore_limits=ignore_limits,
+        )
+        if blocked is not None:
+            return blocked
         if not body and not image_path:
             return Delivery(STATUS_SEND_FAILED, "没有可发送的内容。")
 
         cooldown_key = clean_text(source_session_id) or target
-
-        if not ignore_limits and cooldown > 0:
-            remaining = await self.store.cooldown_remaining(channel, cooldown_key, cooldown)
-            if remaining > 0:
-                return Delivery(
-                    STATUS_COOLDOWN,
-                    f"这个会话还在冷却中，剩余约 {convert_duration(remaining)}，本次没有发送。",
-                    remaining,
-                )
-
-        if not ignore_limits and hourly_limit > 0:
-            limited, used = await self.store.rate_limited(channel, hourly_limit)
-            if limited:
-                return Delivery(
-                    STATUS_RATE_LIMITED,
-                    f"最近一小时已经发了 {used} 条，达到上限 {hourly_limit} 条，本次没有发送。",
-                )
 
         # 文本才是主角 —— 那是模型自己写的那句话；卡片只是跟在后面的一张截图。
         # 所以两者都发，顺序也保持「先说话、再上图」。

@@ -27,6 +27,10 @@ LOG_PREFIX = "[HarassmentReporter]"
 # 截断反而更接近真实的聊天截图观感。
 LINE_TEXT_LIMIT = 220
 
+# 群名缓存的条数上限。一个 Bot 顶多在几百个群里，这个数足够大，
+# 又保证进程长期运行时缓存不会无上限地涨。
+GROUP_NAME_CACHE_LIMIT = 512
+
 SOURCE_GROUP = "group_history"
 SOURCE_PRIVATE = "private_history"
 SOURCE_CONTEXT = "conversation"
@@ -79,19 +83,29 @@ class ChatLogCollector:
         self._group_names: dict[str, str] = {}
 
     async def group_name(self, event: Any, gid: str = "") -> str:
-        """取群名称，取不到就返回空串。结果按平台实例缓存。"""
+        """取群名称，取不到就返回空串。取到了才缓存。
+
+        只缓存成功的结果 —— 协议端刚重启、或者一次网络抖动导致取名失败，
+        如果把空串也存下来，这个群就会一直显示成「群 123456」再也好不了。
+        缓存同时限了条数，长期跑下来不会无声无息地把内存吃掉。
+        """
         gid = clean_text(gid) or group_id(event)
         if not gid or not is_onebot_event(event):
             return ""
         cache_key = f"{platform_id(event)}:{gid}"
-        if cache_key in self._group_names:
-            return self._group_names[cache_key]
+        cached = self._group_names.get(cache_key)
+        if cached:
+            return cached
         name = ""
         try:
             name = await self.bridge.fetch_group_name(get_client(event), gid)
         except Exception:
             name = ""
-        self._group_names[cache_key] = name
+        if name:
+            if len(self._group_names) >= GROUP_NAME_CACHE_LIMIT:
+                # 简单粗暴地丢掉最早进来的一条就够了，这里不值得引入 LRU。
+                self._group_names.pop(next(iter(self._group_names)), None)
+            self._group_names[cache_key] = name
         return name
 
     async def collect(
@@ -213,7 +227,6 @@ class ChatLogCollector:
             log.source = SOURCE_CURRENT
 
     # ------------------------------------------------------------------
-    # ------------------------------------------------------------------
     # 头像
     # ------------------------------------------------------------------
     def _attach_avatars(self, event: Any, log: ChatLog) -> None:
@@ -231,6 +244,7 @@ class ChatLogCollector:
             qq_group_avatar(log.group_id) if log.group_id else qq_user_avatar(sender_id(event))
         )
 
+    # ------------------------------------------------------------------
     # 卡片头部文案
     # ------------------------------------------------------------------
     @staticmethod

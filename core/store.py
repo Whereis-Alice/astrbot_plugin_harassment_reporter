@@ -19,6 +19,17 @@ RATE_STORAGE_KEY = "rate_counter_v1"
 CONTACT_STORAGE_KEY = "feedback_contacts_v1"
 
 
+def _as_ts(value: Any) -> float:
+    """把键值库里的任意值当时间戳读，读不出来算 0。
+
+    冷却表在裁剪时要按时间排序，而排序键一旦抛异常，整条上报就断在这里。
+    """
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class KVHost(Protocol):
     """AstrBot Star 自带的键值存储接口。"""
 
@@ -151,28 +162,45 @@ class Store:
         now = time.time()
         data[f"{channel}|{session_id}"] = now
         if len(data) > 400:
-            kept = sorted(data.items(), key=lambda item: float(item[1] or 0), reverse=True)[:200]
+            kept = sorted(data.items(), key=lambda item: _as_ts(item[1]), reverse=True)[:200]
             data = dict(kept)
         await self._put(COOLDOWN_STORAGE_KEY, data)
 
     # ------------------------------------------------------------------
     # 每小时发送上限（防止把主人淹掉）
     # ------------------------------------------------------------------
+    @staticmethod
+    def _recent_stamps(data: dict[str, Any], channel: str) -> list[float]:
+        """取出某个通道最近一小时内的发送时间戳。
+
+        键值库里存的是历史数据，不能假定它一定是个列表 —— 万一被写坏了，
+        或者哪个旧版本在同一个键上放过别的类型，直接迭代就是一个 TypeError，
+        而这个异常会顺着 deliver() 一路冒上去，把整条上报都带崩。
+        """
+        raw = data.get(channel)
+        if not isinstance(raw, list):
+            return []
+        cutoff = time.time() - 3600
+        stamps: list[float] = []
+        for item in raw:
+            if isinstance(item, bool) or not isinstance(item, (int, float)):
+                continue
+            value = float(item)
+            if value >= cutoff:
+                stamps.append(value)
+        return stamps
+
     async def rate_limited(self, channel: str, limit: int) -> tuple[bool, int]:
         """返回 (是否超限, 最近一小时已发送条数)。"""
         if limit <= 0:
             return False, 0
         data = await self._get_dict(RATE_STORAGE_KEY)
-        cutoff = time.time() - 3600
-        stamps = [float(x) for x in data.get(channel, []) if isinstance(x, (int, float))]
-        stamps = [ts for ts in stamps if ts >= cutoff]
+        stamps = self._recent_stamps(data, channel)
         return len(stamps) >= limit, len(stamps)
 
     async def mark_rate(self, channel: str) -> None:
         data = await self._get_dict(RATE_STORAGE_KEY)
-        cutoff = time.time() - 3600
-        stamps = [float(x) for x in data.get(channel, []) if isinstance(x, (int, float))]
-        stamps = [ts for ts in stamps if ts >= cutoff]
+        stamps = self._recent_stamps(data, channel)
         stamps.append(time.time())
         data[channel] = stamps[-500:]
         await self._put(RATE_STORAGE_KEY, data)

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import ast
-import random
 import re
-import string
 import time
 from datetime import datetime
 from typing import Any
@@ -295,7 +293,3 @@ def pack_lines(
         output.append(candidate)
         used += len(candidate) + 1
     return "\n".join(output)
-
-
-def random_suffix(length: int = 6) -> str:
-    return "".join(random.choice(string.ascii_lowercase + string.digits) for _ in range(length))
