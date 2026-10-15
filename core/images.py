@@ -116,7 +116,8 @@ def _is_image(comp: Any) -> bool:
     ComponentType 的取值就是类名字符串（Image / Plain / Reply …），
     比对字符串就够了，不必为此 import 整个组件模块。
     """
-    return clean_text(getattr(comp, "type", "")) == "Image"
+    # str(Enum) 会变成 "ComponentType.Image"，但枚举本身可以和 "Image" 直接比较。
+    return getattr(comp, "type", None) == "Image"
 
 
 def dedupe(refs: list[ImageRef], *, limit: int) -> list[ImageRef]:
@@ -155,7 +156,7 @@ def from_reply(event: Any, *, limit: int) -> list[ImageRef]:
     """
     refs: list[ImageRef] = []
     for comp in _chain_of(event):
-        if clean_text(getattr(comp, "type", "")) != "Reply":
+        if getattr(comp, "type", None) != "Reply":
             continue
         quoted = getattr(comp, "chain", None)
         if not isinstance(quoted, list):

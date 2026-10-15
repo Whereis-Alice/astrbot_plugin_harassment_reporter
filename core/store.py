@@ -17,6 +17,7 @@ WARN_CACHE_STORAGE_KEY = "warned_sessions_v1"
 COOLDOWN_STORAGE_KEY = "report_cooldown_v1"
 RATE_STORAGE_KEY = "rate_counter_v1"
 CONTACT_STORAGE_KEY = "feedback_contacts_v1"
+COURIER_STORAGE_KEY = "courier_state_v1"
 
 
 def _as_ts(value: Any) -> float:
@@ -232,3 +233,13 @@ class Store:
 
     async def clear_contacts(self) -> None:
         await self.put_contacts([])
+
+    async def get_courier_state(self) -> dict[str, Any]:
+        # 拒收和限流关系读取失败时必须阻止发送，不能把存储故障当成空名单。
+        data = await self._host.get_kv_data(COURIER_STORAGE_KEY, {})
+        if not isinstance(data, dict):
+            raise ValueError("联系人传话状态损坏，请检查插件存储")
+        return dict(data)
+
+    async def put_courier_state(self, state: dict[str, Any]) -> None:
+        await self._host.put_kv_data(COURIER_STORAGE_KEY, state)

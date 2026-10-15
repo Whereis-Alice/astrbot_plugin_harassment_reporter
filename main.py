@@ -1,10 +1,11 @@
 """AstrBot 插件「我会打小报告」：让 Bot 学会主动来找你。
 
-三条主线：
+四条主线：
 1. 帮群友传话：有人说「跟你主人说一声」，或者 Bot 自己读出了不满，
    它就会用自己的口吻去找主人，顺手附上一张最近群聊记录的卡片。
 2. 骚扰上报：Bot 在对话里觉得自己被骚扰时，主动把情况报给主人。
 3. 群事件小报告：Bot 被禁言 / 被踢 / 被设管理员这类事件，用 Bot 自己的人格告诉主人。
+4. 联系人传话：按名字找指定好友，用当前人格带话、带图、带回话。
 
 具体业务都在 core/ 下面，这个文件只负责装配依赖、注入提示词和提供命令入口。
 """
@@ -23,6 +24,7 @@ from astrbot.core.star.filter.custom_filter import CustomFilter
 from .core.card import PAGE_WIDTH, CardRenderer
 from .core.chatlog import ChatLogCollector
 from .core.config import Settings
+from .core.courier import CourierService
 from .core.eventinfo import origin_label, session_id
 from .core.feedback import FeedbackService
 from .core.harassment import HarassmentService
@@ -33,14 +35,14 @@ from .core.outbox import Outbox
 from .core.persona import PersonaWriter
 from .core.store import Store
 from .core.text import PLUGIN_DISPLAY_NAME, clean_text, truncate
-from .core.tools import FeedbackRelayTool, HarassmentReportTool
+from .core.tools import FeedbackRelayTool, HarassmentReportTool, PersonRelayTool
 from .core.watchlist import Watchlist
 
 LOG_PREFIX = "[HarassmentReporter]"
 REPO_URL = "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter"
 
 
-def _plugin_version(fallback: str = "2.2.0") -> str:
+def _plugin_version(fallback: str = "2.3.0") -> str:
     """版本号以 metadata.yaml 为准，代码这边只兜底。
 
     AstrBot 认的是 metadata.yaml；而 @star.register、/hr_status、/hr_help 和启动日志
@@ -99,7 +101,7 @@ class OneBotNoticeFilter(CustomFilter):
     "astrbot_plugin_harassment_reporter",
     "Huli3",
     "我会打小报告：让 Bot 用自己的口吻主动来找你——帮群友传话、被骚扰时告状、"
-    "被禁言被踢时汇报，还会带上一张最近群聊记录卡片",
+    "被禁言被踢时汇报，也能给指定联系人带话、带图、带回话",
     PLUGIN_VERSION,
     REPO_URL,
 )
@@ -121,6 +123,7 @@ class HarassmentReporterPlugin(star.Star):
             history=self.history,
         )
         self.outbox = Outbox(context, self.store, self.settings, self.card)
+        self.courier = CourierService(settings=self.settings, store=self.store, bridge=self.bridge)
 
         self.harassment = HarassmentService(
             context=context,
@@ -154,8 +157,9 @@ class HarassmentReporterPlugin(star.Star):
 
         self.report_tool = HarassmentReportTool(plugin=self)
         self.feedback_tool = FeedbackRelayTool(plugin=self)
+        self.courier_tool = PersonRelayTool(plugin=self)
         try:
-            context.add_llm_tools(self.report_tool, self.feedback_tool)
+            context.add_llm_tools(self.report_tool, self.feedback_tool, self.courier_tool)
         except Exception as exc:
             logger.error("%s 注册 LLM 工具失败：%s", LOG_PREFIX, exc)
 
@@ -185,6 +189,7 @@ class HarassmentReporterPlugin(star.Star):
             logger.warning("%s 读不到插件配置，将全部使用默认值。", LOG_PREFIX)
 
     async def terminate(self) -> None:
+        self.courier.close()
         logger.info("%s v%s 已卸载。", LOG_PREFIX, PLUGIN_VERSION)
 
     # ------------------------------------------------------------------
@@ -289,6 +294,20 @@ class HarassmentReporterPlugin(star.Star):
     # ------------------------------------------------------------------
     # 提示词注入：不靠关键词，让模型自己判断什么时候该上报、什么时候该问
     # ------------------------------------------------------------------
+    async def handle_tool_courier(
+        self, *, event: AstrMessageEvent, target: str, message: str,
+        include_images: bool = False, reply_to_recent: bool = False,
+    ) -> str:
+        self._refresh_runtime()
+        try:
+            return await self.courier.relay(
+                event=event, target=target, message=message,
+                include_images=include_images, reply_to_recent=reply_to_recent,
+            )
+        except Exception as exc:
+            logger.error("%s 联系人传话未完成：%s", LOG_PREFIX, type(exc).__name__)
+            return "传话过程未完成，发送结果无法确认。不要宣称已送达，也不要自动重试。"
+
     def _mode_hint(self) -> str:
         settings = self.settings
         mode = settings.tool_response_mode
@@ -402,7 +421,7 @@ class HarassmentReporterPlugin(star.Star):
         event: AstrMessageEvent,
         req: ProviderRequest,
     ) -> None:
-        """把两个工具的使用说明作为临时上下文塞进这一轮请求。
+        """把适用于当前会话的工具说明作为临时上下文塞进这一轮请求。
 
         用 mark_as_temp() 标记，所以不会污染长期对话历史。
         """
@@ -422,6 +441,12 @@ class HarassmentReporterPlugin(star.Star):
             # 注意：feedback_proactive_ask 只决定「要不要主动察觉不满」，
             # 关掉它之后模型仍然要知道这个工具的存在，否则用户明确请它传话时会答不上来。
             blocks.append(self._feedback_hint())
+        try:
+            courier_hint = await self.courier.hint(event)
+            if courier_hint:
+                blocks.append(courier_hint)
+        except Exception as exc:
+            logger.warning("%s 联系人传话提示暂不可用：%s", LOG_PREFIX, type(exc).__name__)
         if not blocks:
             return
 
@@ -448,6 +473,32 @@ class HarassmentReporterPlugin(star.Star):
     # ==================================================================
     # 命令区
     # ==================================================================
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("hr_friends_refresh", alias={"刷新好友列表"})
+    async def cmd_friends_refresh(self, event: AstrMessageEvent):
+        """刷新当前 Bot 账号的好友缓存，不公开通讯录。"""
+        yield event.plain_result(await self.courier.refresh(event))
+
+    @filter.command("hr_courier_off")
+    async def cmd_courier_off(self, event: AstrMessageEvent):
+        """拒收别人托 Bot 带来的话，只能设置自己。"""
+        try:
+            result = await self.courier.optout(event, enabled=False)
+        except Exception as exc:
+            logger.error("%s 无法更新联系人拒收设置：%s", LOG_PREFIX, type(exc).__name__)
+            result = "暂时无法读取拒收设置，请让管理员检查插件存储。没有读取到拒收记录时，联系人传话也不会投递。"
+        yield event.plain_result(result)
+
+    @filter.command("hr_courier_on")
+    async def cmd_courier_on(self, event: AstrMessageEvent):
+        """恢复接收别人托 Bot 带来的话。"""
+        try:
+            result = await self.courier.optout(event, enabled=True)
+        except Exception as exc:
+            logger.error("%s 无法更新联系人接收设置：%s", LOG_PREFIX, type(exc).__name__)
+            result = "暂时无法读取接收设置，请让管理员检查插件存储，不会默认为你恢复接收。"
+        yield event.plain_result(result)
 
     @filter.command("harassment_sid", alias={"hr_sid"})
     async def cmd_sid(self, event: AstrMessageEvent):
@@ -528,7 +579,7 @@ class HarassmentReporterPlugin(star.Star):
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("harassment_status", alias={"hr_status"})
     async def cmd_status(self, event: AstrMessageEvent):
-        """一屏看完三条通道 + 卡片 + 名单的当前状态。"""
+        """查看各条通道 + 卡片 + 名单的当前状态。"""
         self._refresh_runtime()
         settings = self.settings
         try:
@@ -583,6 +634,17 @@ class HarassmentReporterPlugin(star.Star):
             "正文补一行来源：" + _switch(settings.feedback_append_source),
             "联系记录：" + str(len(contacts)) + " 条（上限 "
             + str(settings.feedback_recent_max_entries) + "）",
+            "",
+            "— 联系人传话 —",
+            "状态：" + _switch(settings.courier_enabled),
+            "任意联系人发起权限：" + ("所有人" if settings.courier_allow_anyone else "管理员 + 指定 QQ 白名单"),
+            "允许群聊发起：" + _switch(settings.courier_allow_groups),
+            "别名：" + str(len(settings.courier_aliases)) + " 项 ｜ 临时会话群："
+            + (settings.courier_temp_group or "未开启"),
+            "每人冷却 " + str(settings.courier_cooldown_seconds) + " 秒 ｜ 每人每小时 "
+            + str(settings.courier_hourly_limit) + " 次 ｜ 收件人每小时 " + str(settings.courier_recipient_limit) + " 次",
+            "当前 Bot 每小时总上限：" + str(settings.courier_global_limit) + " 次",
+            "回话关系保留 " + str(settings.courier_reply_hours) + " 小时（不保存正文或图片）",
             "",
             "— 群事件小报告 —",
             "状态：" + _switch(settings.notice_enabled),
@@ -817,6 +879,12 @@ class HarassmentReporterPlugin(star.Star):
             "  /hr_back 内容        把回话带回最近那个人（管理员）\n"
             "  /hr_back 2 内容      回 /hr_recent 里的第 2 条（管理员）\n"
             "  /hr_recent_clear     清空联系记录（管理员）\n"
+            "\n"
+            "· 联系人传话（默认管理员私聊，直接自然开口）\n"
+            "  /hr_friends_refresh  刷新当前 Bot 的好友缓存（管理员）\n"
+            "  /刷新好友列表         同上\n"
+            "  /hr_courier_off      私聊拒收别人托我带的话\n"
+            "  /hr_courier_on       私聊恢复接收\n"
             "\n"
             "· 观察名单\n"
             "  /hr_watchlist        查看被上报过的人\n"

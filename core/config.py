@@ -62,6 +62,14 @@ KEY_GROUPS: dict[str, str] = {
     "feedback_append_source": "feedback",
     "feedback_reply_persona_rewrite": "feedback",
     "feedback_recent_max_entries": "feedback",
+    # 给指定联系人带话（与给主人反馈独立授权）
+    **{key: "courier" for key in (
+        "courier_enabled", "courier_allow_anyone", "courier_senders", "courier_allow_groups",
+        "courier_aliases", "courier_blocked", "courier_cache_seconds", "courier_temp_group",
+        "courier_cooldown_seconds", "courier_hourly_limit", "courier_recipient_limit", "courier_global_limit",
+        "courier_max_chars", "courier_forward_images", "courier_image_limit",
+        "courier_image_max_mb", "courier_reply_hours", "courier_record_limit", "courier_timeout_seconds",
+    )},
     # 群事件小报告
     "enable_notice": "notice",
     "notice_session_id": "notice",
@@ -99,6 +107,7 @@ CONFIG_GROUPS: tuple[str, ...] = (
     "harassment",
     "watchlist",
     "feedback",
+    "courier",
     "notice",
     "card",
     "advanced",
@@ -220,7 +229,18 @@ class Settings:
             return False
 
     def _bool(self, key: str, default: bool) -> bool:
-        return bool(self.get(key, default))
+        value = self.get(key, default)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            value = value.strip().lower()
+            if value in {"true", "1", "yes", "on"}:
+                return True
+            if value in {"false", "0", "no", "off", ""}:
+                return False
+        if isinstance(value, (int, float)) and value in (0, 1):
+            return bool(value)
+        return default
 
     def _int(self, key: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
         try:
@@ -411,6 +431,89 @@ class Settings:
     @property
     def feedback_recent_max_entries(self) -> int:
         return self._int("feedback_recent_max_entries", 50, 5, 500)
+
+    # ------------------------------------------------------------------
+    # 联系人传话
+    # ------------------------------------------------------------------
+    def _strings(self, key: str) -> list[str]:
+        raw = self.get(key, [])
+        return [clean_text(x) for x in raw if clean_text(x)] if isinstance(raw, list) else []
+
+    @property
+    def courier_enabled(self) -> bool:
+        return self._bool("courier_enabled", True)
+
+    @property
+    def courier_allow_anyone(self) -> bool:
+        return self._bool("courier_allow_anyone", False)
+
+    @property
+    def courier_senders(self) -> list[str]:
+        return self._strings("courier_senders")
+
+    @property
+    def courier_allow_groups(self) -> bool:
+        return self._bool("courier_allow_groups", False)
+
+    @property
+    def courier_aliases(self) -> list[str]:
+        return self._strings("courier_aliases")
+
+    @property
+    def courier_blocked(self) -> list[str]:
+        return self._strings("courier_blocked")
+
+    @property
+    def courier_cache_seconds(self) -> int:
+        return self._int("courier_cache_seconds", 1800, 0, 86400)
+
+    @property
+    def courier_temp_group(self) -> str:
+        return clean_text(self.get("courier_temp_group", ""))
+
+    @property
+    def courier_cooldown_seconds(self) -> int:
+        return self._int("courier_cooldown_seconds", 15, 0, 3600)
+
+    @property
+    def courier_hourly_limit(self) -> int:
+        return self._int("courier_hourly_limit", 10, 1, 100)
+
+    @property
+    def courier_recipient_limit(self) -> int:
+        return self._int("courier_recipient_limit", 20, 1, 100)
+
+    @property
+    def courier_global_limit(self) -> int:
+        return self._int("courier_global_limit", 100, 1, 1000)
+
+    @property
+    def courier_max_chars(self) -> int:
+        return self._int("courier_max_chars", 1500, 50, 8000)
+
+    @property
+    def courier_forward_images(self) -> bool:
+        return self._bool("courier_forward_images", True)
+
+    @property
+    def courier_image_limit(self) -> int:
+        return self._int("courier_image_limit", 3, 1, 9)
+
+    @property
+    def courier_image_max_mb(self) -> int:
+        return self._int("courier_image_max_mb", 10, 1, 30)
+
+    @property
+    def courier_reply_hours(self) -> int:
+        return self._int("courier_reply_hours", 72, 1, 720)
+
+    @property
+    def courier_record_limit(self) -> int:
+        return self._int("courier_record_limit", 500, 100, 5000)
+
+    @property
+    def courier_timeout_seconds(self) -> int:
+        return self._int("courier_timeout_seconds", 15, 3, 60)
 
     # ------------------------------------------------------------------
     # 群事件通知

@@ -1,15 +1,14 @@
-"""供 LLM 调用的两个工具：骚扰上报、反馈转达。"""
+"""供 LLM 调用的工具：骚扰上报、主人反馈、联系人传话。"""
 
 from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field
-from pydantic.dataclasses import dataclass
-
 from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
+from pydantic import Field
+from pydantic.dataclasses import dataclass
 
 from .text import clean_text
 
@@ -130,5 +129,43 @@ class FeedbackRelayTool(FunctionTool[AstrAgentContext]):
         return await self.plugin.handle_tool_feedback(
             event=event,
             message=clean_text(kwargs.get("message")),
-            send_images=bool(kwargs.get("send_images")),
+            send_images=kwargs.get("send_images") is True,
+        )
+
+
+@dataclass
+class PersonRelayTool(FunctionTool[AstrAgentContext]):
+    """沿用当前对话的人格，给唯一确定的联系人带话或带回话。"""
+
+    name: str = "relay_message_to_person"
+    description: str = (
+        "用户明确请你给某个人传话时使用。用你自己的人格在 message 里写给收件人的话，"
+        "说清是谁托你带什么话；不要冒充发送者。target 必须是用户提供的名字或 QQ 号，"
+        "不能猜。回给最近通过你联系当前用户的人时设 reply_to_recent=true。"
+        "只转用户要求传达的内容；不读取私聊历史，也不自动回应收到的传话。"
+        "向 Bot 主人反馈问题优先用 relay_feedback_to_owner，不能两边重复发。"
+        "权限、收件人、限流都由插件检查，以返回的实际发送结果为准。"
+    )
+    parameters: dict = Field(default_factory=lambda: {
+        "type": "object",
+        "properties": {
+            "target": {"type": "string", "description": "用户给出的别名、好友备注、昵称或 QQ 号；回话且仅有一个联系人时可留空。"},
+            "message": {"type": "string", "description": "你亲自对收件人说的完整一句话，沿用当前人格，准确传达用户想说的事。"},
+            "include_images": {"type": "boolean", "description": "仅在用户要求把当前消息或引用中的图片带过去时设 true，默认 false。"},
+            "reply_to_recent": {"type": "boolean", "description": "用户让你回话给最近找过他的人时设 true；多人时必须指定 target，不得猜人。"},
+        },
+        "required": ["message"],
+    })
+    plugin: Any = Field(default=None)
+
+    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs: Any) -> ToolExecResult:
+        event = _event_of(context)
+        if self.plugin is None or event is None:
+            return "拿不到插件或当前消息事件，这次没有发送。"
+        return await self.plugin.handle_tool_courier(
+            event=event,
+            target=clean_text(kwargs.get("target")),
+            message=clean_text(kwargs.get("message")),
+            include_images=kwargs.get("include_images") is True,
+            reply_to_recent=kwargs.get("reply_to_recent") is True,
         )

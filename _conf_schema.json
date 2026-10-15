@@ -3,7 +3,7 @@
     "type": "bool",
     "description": "启用插件总开关",
     "default": true,
-    "hint": "关掉之后传话、骚扰上报、群事件小报告会全部停止工作"
+    "hint": "关掉之后主人反馈、联系人传话、骚扰上报、群事件小报告会全部停止工作"
   },
   "identity": {
     "type": "object",
@@ -324,6 +324,149 @@
         "min": 5,
         "max": 500,
         "hint": "用 /hr_recent 查看，用 /hr_back 序号 内容 回话"
+      }
+    }
+  },
+  "courier": {
+    "type": "object",
+    "description": "联系人传话（纸飞机）",
+    "hint": "不仅能找主人，也能按名字替你找指定好友，用当前人格带话、带图、带回话。默认仅管理员私聊可用，所有选项与主人反馈独立。",
+    "items": {
+      "courier_enabled": {
+        "type": "bool",
+        "description": "让 Bot 给指定联系人带话",
+        "default": true,
+        "hint": "独立于给主人反馈。模型按用户意思调用工具，不额外做意图分类；默认仅管理员在私聊发起。"
+      },
+      "courier_allow_anyone": {
+        "type": "bool",
+        "description": "允许所有人发起联系人传话",
+        "default": false,
+        "hint": "谨慎开启：普通用户也能让 Bot 给好友带话。不影响最近收件人向原发送者回话的权限。"
+      },
+      "courier_senders": {
+        "type": "list",
+        "description": "额外允许发起的 QQ 号",
+        "default": [],
+        "hint": "每项一个 QQ 号。不开全员权限时，这些人和 AstrBot 管理员可以发起；删掉后立即撤销。"
+      },
+      "courier_allow_groups": {
+        "type": "bool",
+        "description": "允许从群聊发起联系人传话",
+        "default": false,
+        "hint": "关闭时只接受私聊发起和私聊回话。给主人反馈仍保持原有行为。开启后也不会转发群聊历史。"
+      },
+      "courier_aliases": {
+        "type": "list",
+        "description": "联系人别名",
+        "default": [],
+        "hint": "每项一条：别名=QQ号，例如 卡比老师=123456789。优先于好友备注/昵称；同一个别名指向多人时拒绝发送。明确 QQ 号不会被别名重定向。"
+      },
+      "courier_blocked": {
+        "type": "list",
+        "description": "不允许投递的 QQ 号",
+        "default": [],
+        "hint": "每项一个 QQ 号。即使发起者是管理员或用了别名也不会投递；对方还可自行在私聊用 /hr_courier_off 拒收。"
+      },
+      "courier_cache_seconds": {
+        "type": "int",
+        "description": "好友缓存有效期（秒）",
+        "default": 1800,
+        "hint": "按平台实例和 Bot 账号分开缓存。0=每次都刷新；获取失败不使用过期缓存。/hr_friends_refresh 可立即刷新。",
+        "minimum": 0,
+        "maximum": 86400
+      },
+      "courier_temp_group": {
+        "type": "string",
+        "description": "非好友临时会话群号",
+        "default": "",
+        "hint": "留空不向非好友发送。填写后会先确认双方都在此群，再尝试带 group_id 的私聊；仍受 QQ 隐私设置、协议端支持和风控限制，不保证可用。"
+      },
+      "courier_cooldown_seconds": {
+        "type": "int",
+        "description": "每位发起者的传话间隔（秒）",
+        "default": 15,
+        "hint": "按 QQ 号而非群会话计算，不能换个群绕过。0=不设间隔，小时上限仍生效。",
+        "minimum": 0,
+        "maximum": 3600
+      },
+      "courier_hourly_limit": {
+        "type": "int",
+        "description": "每人每小时最多发起次数",
+        "default": 10,
+        "hint": "失败或结果不明的实际发送尝试也会占用额度，避免连续试投。未找到人、没有权限不会占额度。",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "courier_recipient_limit": {
+        "type": "int",
+        "description": "每位收件人每小时最多接收次数",
+        "default": 20,
+        "hint": "不同发起者共用同一个收件人额度，避免多人一起轰炸。",
+        "minimum": 1,
+        "maximum": 100
+      },
+      "courier_max_chars": {
+        "type": "int",
+        "description": "每次传话最大字数",
+        "default": 1500,
+        "hint": "超出时提示缩短，不截断原文偷偷发送。",
+        "minimum": 50,
+        "maximum": 8000
+      },
+      "courier_forward_images": {
+        "type": "bool",
+        "description": "允许联系人传话带图",
+        "default": true,
+        "hint": "只有用户让 Bot 带图时才附图，仅限当前消息和引用中的图片；不会自动翻群图或附带聊天记录。"
+      },
+      "courier_image_limit": {
+        "type": "int",
+        "description": "每次最多附图张数",
+        "default": 3,
+        "hint": "先去重再按上限截取。和给主人反馈的图片开关、上限互相独立。",
+        "minimum": 1,
+        "maximum": 9
+      },
+      "courier_image_max_mb": {
+        "type": "int",
+        "description": "单张本地或 base64 附图上限（MB）",
+        "default": 10,
+        "hint": "本地图片转 base64 后交给 OneBot，适合分离部署；超限图片跳过，回执不计数。远程图片由协议端获取，受协议端自身大小限制。",
+        "minimum": 1,
+        "maximum": 30
+      },
+      "courier_reply_hours": {
+        "type": "int",
+        "description": "允许带回话的关系保留时长（小时）",
+        "default": 72,
+        "hint": "即使未获任意传话权限，收件人也可在时限内主动请 Bot 回给原发送者；多人时必须指明对象。不保存正文或图片。",
+        "minimum": 1,
+        "maximum": 720
+      },
+      "courier_record_limit": {
+        "type": "int",
+        "description": "最多保留联系人关系条数",
+        "default": 500,
+        "hint": "只保存双方 QQ 号、昵称、时间、账号标识、状态和内容哈希；超出按最旧顺序清理，过期关系在下一次访问时清理。",
+        "minimum": 100,
+        "maximum": 5000
+      },
+      "courier_timeout_seconds": {
+        "type": "int",
+        "description": "每次 OneBot 动作超时（秒）",
+        "default": 15,
+        "hint": "发送超时只告知结果不明，不会自动改走临时会话重发。",
+        "minimum": 3,
+        "maximum": 60
+      },
+      "courier_global_limit": {
+        "type": "int",
+        "description": "当前 Bot 每小时传话总次数上限",
+        "default": 100,
+        "minimum": 1,
+        "maximum": 1000,
+        "hint": "和每人/每收件人额度一起生效，包含实际发送但结果不明的尝试。按 Bot 账号隔离，防止开放全员后大量不同用户一起传话。"
       }
     }
   },
