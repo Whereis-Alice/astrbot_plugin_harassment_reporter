@@ -13,13 +13,27 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
 from . import images as image_refs
-from .eventinfo import group_id, message_text, platform_id, self_id, sender_id, sender_name
-from .onebot import ChatLine, get_client, is_onebot_event, qq_group_avatar, qq_user_avatar
+from .attribution import authored_text
+from .eventinfo import (
+    group_id,
+    message_id,
+    message_timestamp,
+    platform_id,
+    self_id,
+    sender_id,
+    sender_name,
+)
+from .onebot import (
+    ChatLine,
+    get_client,
+    is_onebot_event,
+    qq_group_avatar,
+    qq_user_avatar,
+)
 from .text import clean_text, relative_time, strip_placeholders, truncate
 
 LOG_PREFIX = "[HarassmentReporter]"
@@ -84,7 +98,8 @@ class ChatLog:
             return ""
         picked = self.lines[-max(1, max_lines) :]
         return "\n".join(
-            f"{truncate(line.sender_name, 12)}：{truncate(line.text, line_limit)}" for line in picked
+            f"{truncate(line.sender_name, 12)}：{truncate(line.text, line_limit)}"
+            for line in picked
         )
 
     def recent_images(self, *, limit: int) -> list[str]:
@@ -164,7 +179,9 @@ class ChatLogCollector:
     # ------------------------------------------------------------------
     # 数据源
     # ------------------------------------------------------------------
-    async def _fetch(self, event: Any, gid: str, count: int) -> tuple[list[ChatLine], str]:
+    async def _fetch(
+        self, event: Any, gid: str, count: int
+    ) -> tuple[list[ChatLine], str]:
         if is_onebot_event(event):
             client = get_client(event)
             if client is not None:
@@ -198,14 +215,15 @@ class ChatLogCollector:
     async def _from_context(self, event: Any, count: int) -> list[ChatLine]:
         """退路：把当前会话的模型上下文当成聊天记录。
 
-        上下文里分不出群里的具体是谁在说话，只能标成「发送者」和 Bot 自己，
-        所以这只是兜底，观感一定不如真实群聊记录。
+        群上下文无法核实用户作者，标为未知且不附当前用户的 QQ 号或头像。
         """
         try:
             rows = await self.history.chat_rows(
                 clean_text(getattr(event, "unified_msg_origin", "")),
                 limit=count,
-                user_name=sender_name(event),
+                user_name="群聊发言者（未核实）"
+                if group_id(event)
+                else sender_name(event),
                 assistant_name=self.settings.bot_self_name or "我",
             )
         except Exception:
@@ -215,14 +233,21 @@ class ChatLogCollector:
         who = sender_id(event)
         lines: list[ChatLine] = []
         for row in rows:
+            role = clean_text(row.get("role"))
+            if role not in {"user", "assistant"}:
+                continue
             text = clean_text(row.get("text"))
             if not text:
                 continue
-            is_bot = clean_text(row.get("role")) == "assistant"
+            is_bot = role == "assistant"
             lines.append(
                 ChatLine(
-                    sender_name=clean_text(row.get("name"), "未知用户"),
-                    sender_id=me if is_bot else who,
+                    sender_name=(
+                        "群聊发言者（未核实）"
+                        if group_id(event) and not is_bot
+                        else clean_text(row.get("name"), "未知用户")
+                    ),
+                    sender_id=me if is_bot else ("" if group_id(event) else who),
                     text=truncate(text, LINE_TEXT_LIMIT),
                     timestamp=0.0,
                     is_self=is_bot,
@@ -237,23 +262,43 @@ class ChatLogCollector:
         群历史接口通常已经包含它了，所以先查重：查到了就只把图片地址补上去
         （事件里的图片地址比历史接口给的更新，不容易过期），没查到才新增一条。
         """
-        images = [ref.url for ref in image_refs.from_event(event, limit=IMAGE_PER_LINE) if ref.url]
-        current = clean_text(message_text(event))
+        images = [
+            ref.url
+            for ref in image_refs.from_event(event, limit=IMAGE_PER_LINE)
+            if ref.url
+        ]
+        current = authored_text(event)
         if not current and not images:
             return
 
         who = sender_id(event)
+        current_id = message_id(event)
+        current_time = message_timestamp(event)
         key = _dedupe_key(current)
         for line in log.lines[-3:]:
-            if _dedupe_key(line.text) != key:
+            if line.sender_id != who:
                 continue
-            # 纯图片消息的指纹是空串，光凭这个判重会把两个人的图认成一张，
-            # 所以这种情况还要发言人也对得上。
-            if key or line.sender_id == who:
-                for url in images:
-                    if url not in line.images:
-                        line.images.append(url)
-                return
+            if current_id and line.message_id:
+                same = current_id == line.message_id
+            else:
+                # 没有消息 ID 只在同一发送者、同一秒且有文字时去重。
+                # 无时间的上下文和纯图片消息无法核实为同一次发送，不猜。
+                same = bool(
+                    key
+                    and _dedupe_key(line.text) == key
+                    and current_time
+                    and line.timestamp
+                    and int(current_time) == int(line.timestamp)
+                )
+            if not same:
+                continue
+            if _dedupe_key(line.text) != key:
+                # ID 一致时仍以当前事件本人文字为准，引用不并入作者原话。
+                line.text = truncate(current, LINE_TEXT_LIMIT) or "[图片]"
+            for url in images:
+                if url not in line.images:
+                    line.images.append(url)
+            return
 
         log.lines.append(
             ChatLine(
@@ -261,9 +306,10 @@ class ChatLogCollector:
                 sender_id=who,
                 # 纯图片消息在事件里没有文字，补个占位符，跟群历史接口的写法保持一致。
                 text=truncate(current, LINE_TEXT_LIMIT) or "[图片]",
-                timestamp=time.time(),
+                timestamp=current_time,
                 is_self=False,
                 images=images,
+                message_id=current_id,
             )
         )
         if log.source == SOURCE_EMPTY:
@@ -284,7 +330,9 @@ class ChatLogCollector:
             if not line.avatar:
                 line.avatar = qq_user_avatar(line.sender_id)
         log.group_avatar = (
-            qq_group_avatar(log.group_id) if log.group_id else qq_user_avatar(sender_id(event))
+            qq_group_avatar(log.group_id)
+            if log.group_id
+            else qq_user_avatar(sender_id(event))
         )
 
     # ------------------------------------------------------------------
@@ -304,4 +352,6 @@ class ChatLogCollector:
         moment = relative_time(latest)
         if moment:
             parts.append(moment)
+        if log.source == SOURCE_CONTEXT and log.group_id:
+            parts.append("模型上下文 · 历史发言者未核实")
         log.subtitle = " · ".join(parts)

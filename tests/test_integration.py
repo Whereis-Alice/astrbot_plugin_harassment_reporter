@@ -16,7 +16,7 @@ def test_every_production_python_file_compiles_without_writing_cache():
 
 
 def test_entrypoint_imports_against_installed_astrbot_sdk():
-    assert plugin_module("main").PLUGIN_VERSION == "2.3.0"
+    assert plugin_module("main").PLUGIN_VERSION == "2.3.1"
 
 
 def test_settings_schema_defaults_and_group_mapping_are_consistent():
@@ -38,9 +38,9 @@ def test_settings_schema_defaults_and_group_mapping_are_consistent():
 
 
 def test_versions_and_public_docs():
-    assert "version: 2.3.0" in (ROOT / "metadata.yaml").read_text(encoding="utf-8")
-    assert "version-2.3.0-" in (ROOT / "README.md").read_text(encoding="utf-8")
-    assert "## [2.3.0] - 2026-10-15" in (ROOT / "CHANGELOG.md").read_text(
+    assert "version: 2.3.1" in (ROOT / "metadata.yaml").read_text(encoding="utf-8")
+    assert "version-2.3.1-" in (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "## [2.3.1] - 2026-10-25" in (ROOT / "CHANGELOG.md").read_text(
         encoding="utf-8"
     )
     assert "首个骚扰上报器插件版本" in (ROOT / "CHANGELOG.md").read_text(

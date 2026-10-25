@@ -21,6 +21,7 @@ from astrbot.api.provider import ProviderRequest
 from astrbot.core.agent.message import TextPart
 from astrbot.core.star.filter.custom_filter import CustomFilter
 
+from .core.attribution import current_identity_hint
 from .core.card import PAGE_WIDTH, CardRenderer
 from .core.chatlog import ChatLogCollector
 from .core.config import Settings
@@ -42,7 +43,7 @@ LOG_PREFIX = "[HarassmentReporter]"
 REPO_URL = "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter"
 
 
-def _plugin_version(fallback: str = "2.3.0") -> str:
+def _plugin_version(fallback: str = "2.3.1") -> str:
     """版本号以 metadata.yaml 为准，代码这边只兜底。
 
     AstrBot 认的是 metadata.yaml；而 @star.register、/hr_status、/hr_help 和启动日志
@@ -327,10 +328,11 @@ class HarassmentReporterPlugin(star.Star):
             return f"调用后先完成上报，再自然告诉对方你已经报告给{receiver}。"
         return ""
 
-    def _harassment_hint(self) -> str:
+    def _harassment_hint(self, event: AstrMessageEvent | None = None) -> str:
         return (
             "[可用安全工具提示]\n"
-            "如果你在当前对话里感觉自己正在被骚扰、辱骂、挑衅、恶意消耗，"
+            + (current_identity_hint(event) if event is not None else "")
+            + "如果你在当前对话里感觉自己正在被骚扰、辱骂、挑衅、恶意消耗，"
             "或者对方持续让你明显不舒服，你可以主动调用 `report_harassment` 工具。\n"
             "调用时请简洁填写：\n"
             "- `reason`: 为什么你觉得这是骚扰\n"
@@ -432,7 +434,7 @@ class HarassmentReporterPlugin(star.Star):
 
         blocks: list[str] = []
         if settings.report_session_id:
-            blocks.append(self._harassment_hint())
+            blocks.append(self._harassment_hint(event))
         if (
             settings.feedback_enabled
             and settings.feedback_session_id

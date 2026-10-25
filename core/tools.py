@@ -28,6 +28,9 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
     description: str = (
         "当你在和用户聊天时感觉自己正在被骚扰、辱骂、挑衅、恶意消耗，"
         "或者对方持续让你明显不舒服时，使用这个工具上报给主人。"
+        "上报对象是当前事件的发送者。群聊历史里的 User 不代表同一个人，"
+        "只能归属明确标注同一发送者 ID 的原话；别人发言、引用原文和我给别人的回复不能算到他身上。"
+        "身份不确定时只说明他当前这条消息和你的感受，不编写他的历史行为。"
     )
     parameters: dict = Field(
         default_factory=lambda: {
@@ -35,7 +38,7 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
             "properties": {
                 "reason": {
                     "type": "string",
-                    "description": "简短说明为什么你觉得自己正在被骚扰。",
+                    "description": "只基于当前用户本人可确认的发言，说明你的感受或担忧；不把猜测写成已核实事实。",
                 },
                 "severity": {
                     "type": "string",
@@ -44,7 +47,7 @@ class HarassmentReportTool(FunctionTool[AstrAgentContext]):
                 },
                 "evidence": {
                     "type": "string",
-                    "description": "可选。摘录关键内容或补充说明。",
+                    "description": "可选。只摘当前用户本人可核实的原话；被引用的别人的原文不算他本人发言，不确定归属就留空。",
                 },
                 "expected_help": {
                     "type": "string",

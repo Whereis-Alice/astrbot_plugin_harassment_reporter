@@ -120,12 +120,13 @@
       },
       "attach_recent_context_summary": {
         "type": "bool",
-        "description": "上报时附带最近几轮对话摘要",
-        "default": true
+        "description": "上报时附带标明作者的最近聊天原文",
+        "default": true,
+        "hint": "文字与卡片共用平台记录，按发送者 ID 区分；人格改写只读上报对象本人的发言。群聊历史作者无法确认时会明确标为未核实。"
       },
       "recent_context_summary_lines": {
         "type": "int",
-        "description": "摘要最多包含几行",
+        "description": "最近聊天原文最多包含几条",
         "default": 6,
         "min": 1,
         "max": 40,
@@ -135,7 +136,7 @@
       },
       "recent_context_summary_max_chars": {
         "type": "int",
-        "description": "摘要最大字符数",
+        "description": "最近聊天原文最大字符数",
         "default": 600,
         "min": 80,
         "max": 8000,
@@ -275,7 +276,7 @@
         "type": "bool",
         "description": "附带最近的群聊记录",
         "default": true,
-        "hint": "开启后，Bot 会带上一张最近群聊记录的卡片，你不用追问就知道发生了什么。群聊记录走 OneBot 接口读取真实消息（NapCat / LLOneBot / Lagrange 等），拿不到时自动退回会话上下文"
+        "hint": "开启后，Bot 会带上一张最近群聊记录的卡片，你不用追问就知道发生了什么。优先走 OneBot 接口读取真实消息；拿不到时退回会话上下文，群聊旧发言会标为作者未核实，不套用当前用户身份"
       },
       "feedback_chatlog_count": {
         "type": "int",
@@ -794,19 +795,19 @@
   },
   "attach_recent_context_summary": {
     "type": "bool",
-    "description": "（旧版字段，已迁移到「骚扰上报」分组）上报时附带最近几轮对话摘要",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）上报时附带标明作者的最近聊天原文",
     "default": true,
     "invisible": true
   },
   "recent_context_summary_lines": {
     "type": "int",
-    "description": "（旧版字段，已迁移到「骚扰上报」分组）摘要最多包含几行",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）最近聊天原文最多包含几条",
     "default": 6,
     "invisible": true
   },
   "recent_context_summary_max_chars": {
     "type": "int",
-    "description": "（旧版字段，已迁移到「骚扰上报」分组）摘要最大字符数",
+    "description": "（旧版字段，已迁移到「骚扰上报」分组）最近聊天原文最大字符数",
     "default": 600,
     "invisible": true
   },

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .text import clean_text
@@ -54,6 +55,31 @@ def sender_name(event: Any) -> str:
 
 def message_text(event: Any, fallback: str = "") -> str:
     return clean_text(getattr(event, "message_str", ""), fallback)
+
+
+def message_id(event: Any) -> str:
+    obj = getattr(event, "message_obj", None)
+    raw = getattr(obj, "raw_message", None)
+    if isinstance(raw, dict) and raw.get("message_id") is not None:
+        return clean_text(raw["message_id"])
+    return clean_text(getattr(obj, "message_id", ""))
+
+
+def message_timestamp(event: Any) -> float:
+    """原始平台时间优先，避免把上报耗时当成发言时间。拿不到时返回 0。"""
+    obj = getattr(event, "message_obj", None)
+    raw = getattr(obj, "raw_message", None)
+    for value in (
+        (raw.get("time") if isinstance(raw, dict) else None),
+        getattr(obj, "timestamp", None),
+    ):
+        try:
+            stamp = float(value)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if math.isfinite(stamp) and stamp > 0:
+            return stamp
+    return 0.0
 
 
 def watch_key(event: Any) -> str:

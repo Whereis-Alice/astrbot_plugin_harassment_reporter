@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import time
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -38,6 +38,7 @@ class ChatLine:
     avatar: str = ""
     # 这条消息里图片的 http 地址。卡片用它画缩略图，转发时也能直接重发。
     images: list[str] = field(default_factory=list)
+    message_id: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -48,6 +49,7 @@ class ChatLine:
             "is_self": self.is_self,
             "avatar": self.avatar,
             "images": list(self.images),
+            "message_id": self.message_id,
         }
 
 
@@ -233,7 +235,9 @@ class OneBotBridge:
         gid = clean_text(group_id)
         if not gid:
             return ""
-        result = await self.call(client, "get_group_info", group_id=int(gid) if gid.isdigit() else gid)
+        result = await self.call(
+            client, "get_group_info", group_id=int(gid) if gid.isdigit() else gid
+        )
         if isinstance(result, dict):
             name = clean_text(result.get("group_name"))
             if name:
@@ -254,7 +258,9 @@ class OneBotBridge:
                 no_cache=False,
             )
             if isinstance(result, dict):
-                name = clean_text(result.get("card")) or clean_text(result.get("nickname"))
+                name = clean_text(result.get("card")) or clean_text(
+                    result.get("nickname")
+                )
                 if name:
                     return name
         stranger = await self.call(
@@ -284,7 +290,9 @@ class OneBotBridge:
         lines: list[ChatLine] = []
         for item in messages[-max(1, count) :]:
             sender = item.get("sender") if isinstance(item.get("sender"), dict) else {}
-            sender_id = clean_text(sender.get("user_id")) or clean_text(item.get("user_id"))
+            sender_id = clean_text(sender.get("user_id")) or clean_text(
+                item.get("user_id")
+            )
             sender_name = (
                 clean_text(sender.get("card"))
                 or clean_text(sender.get("nickname"))
@@ -296,16 +304,19 @@ class OneBotBridge:
                 text = truncate(clean_text(item.get("raw_message")), text_limit)
             try:
                 timestamp = float(item.get("time") or 0)
-            except Exception:
+            except (TypeError, ValueError, OverflowError):
+                timestamp = 0.0
+            if not math.isfinite(timestamp) or timestamp <= 0:
                 timestamp = 0.0
             lines.append(
                 ChatLine(
                     sender_name=sender_name,
                     sender_id=sender_id,
                     text=text or "[空消息]",
-                    timestamp=timestamp or time.time(),
+                    timestamp=timestamp,
                     is_self=bool(mine) and sender_id == mine,
                     images=collect_segment_images(item.get("message")),
+                    message_id=clean_text(item.get("message_id")),
                 )
             )
         return lines
@@ -353,7 +364,9 @@ class OneBotBridge:
             else:
                 self.capability.clear_strike("group_history_count")
         if result is None:
-            result = await self.call(client, "get_group_msg_history", group_id=group_arg)
+            result = await self.call(
+                client, "get_group_msg_history", group_id=group_arg
+            )
         if result is None:
             return []
 
