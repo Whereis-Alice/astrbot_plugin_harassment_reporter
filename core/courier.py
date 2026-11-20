@@ -151,6 +151,7 @@ class CourierService:
             "用户明确请你联系某个人时，可以调用 relay_message_to_person。"
             "target 填用户提供的别名、好友备注、昵称或 QQ 号；不能猜号码，也不能把普通聊天当成传话许可。"
             "message 是你亲自对收件人说的话，沿用当前人格，讲清是谁托你带什么话，不要冒充发送者。"
+            "像平时聊天一样表达，不用每次点名，不要添加署名、QQ 号、落款或‘托我带的话’尾注。"
             "只传用户要求传达的内容，不擅自附带私聊历史或其它人的隐私。"
             "只有用户要求带图才设 include_images=true（仅带当前消息或引用里的图，不翻历史）。"
             "同名或不明确时先问用户，不要自行选人。以工具返回为准：接口接收不等于已读，"
@@ -422,9 +423,8 @@ class CourierService:
                 return "无法确认 Bot 和对方都在配置的临时会话群内，这次没有发送。"
             params["group_id"] = int(gid)
 
-        signature = f"{sender_name(event)}（{actor}）托我带的话"
         segments: list[dict[str, Any]] = [
-            {"type": "text", "data": {"text": body + "\n\n—— " + signature}}
+            {"type": "text", "data": {"text": body}}
         ]
         count = 0
         if include_images and self.settings.courier_forward_images:

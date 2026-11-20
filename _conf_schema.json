@@ -316,7 +316,7 @@
         "type": "bool",
         "description": "回话时按人设转述",
         "default": true,
-        "hint": "你用 /hr_back 回话后，Bot 会用人设口吻把话带回给对方，而不是发一条冷冰冰的系统通知"
+        "hint": "仅影响 /hr_back 命令：开启时读取当前会话人格转述，关闭时直接带回原意。在绑定的反馈窗口对 Bot 自然说‘帮我回他’时，直接沿用当前模型人格，不需要额外改写"
       },
       "feedback_recent_max_entries": {
         "type": "int",

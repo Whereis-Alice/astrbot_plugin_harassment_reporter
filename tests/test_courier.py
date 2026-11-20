@@ -119,7 +119,7 @@ def test_exact_friend(target):
     assert "协议端接收" in relay(service, target=target)
     assert bridge.sent[0]["user_id"] == 20002
     assert "群聊记录" not in bridge.sent[0]["message"][0]["data"]["text"]
-    assert "10001" in bridge.sent[0]["message"][0]["data"]["text"]
+    assert bridge.sent[0]["message"][0]["data"]["text"] == "小明，狐狸托我问你晚点一起玩吗？"
     assert "晚点一起玩吗" not in str(host.data)  # 不保存正文
 
 

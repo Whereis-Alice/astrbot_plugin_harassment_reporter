@@ -36,14 +36,19 @@ from .core.outbox import Outbox
 from .core.persona import PersonaWriter
 from .core.store import Store
 from .core.text import PLUGIN_DISPLAY_NAME, clean_text, truncate
-from .core.tools import FeedbackRelayTool, HarassmentReportTool, PersonRelayTool
+from .core.tools import (
+    FeedbackRelayTool,
+    FeedbackReplyTool,
+    HarassmentReportTool,
+    PersonRelayTool,
+)
 from .core.watchlist import Watchlist
 
 LOG_PREFIX = "[HarassmentReporter]"
 REPO_URL = "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter"
 
 
-def _plugin_version(fallback: str = "2.3.1") -> str:
+def _plugin_version(fallback: str = "2.4.0") -> str:
     """版本号以 metadata.yaml 为准，代码这边只兜底。
 
     AstrBot 认的是 metadata.yaml；而 @star.register、/hr_status、/hr_help 和启动日志
@@ -159,8 +164,9 @@ class HarassmentReporterPlugin(star.Star):
         self.report_tool = HarassmentReportTool(plugin=self)
         self.feedback_tool = FeedbackRelayTool(plugin=self)
         self.courier_tool = PersonRelayTool(plugin=self)
+        self.feedback_reply_tool = FeedbackReplyTool(plugin=self)
         try:
-            context.add_llm_tools(self.report_tool, self.feedback_tool, self.courier_tool)
+            context.add_llm_tools(self.report_tool, self.feedback_tool, self.courier_tool, self.feedback_reply_tool)
         except Exception as exc:
             logger.error("%s 注册 LLM 工具失败：%s", LOG_PREFIX, exc)
 
@@ -309,6 +315,18 @@ class HarassmentReporterPlugin(star.Star):
             logger.error("%s 联系人传话未完成：%s", LOG_PREFIX, type(exc).__name__)
             return "传话过程未完成，发送结果无法确认。不要宣称已送达，也不要自动重试。"
 
+    async def handle_tool_feedback_reply(
+        self, *, event: AstrMessageEvent, contact_id: str, message: str,
+    ) -> str:
+        self._refresh_runtime()
+        try:
+            return await self.feedback.handle_reply_tool(
+                event=event, contact_id=contact_id, message=message,
+            )
+        except Exception as exc:
+            logger.error("%s 主人回话未能确认完成：%s", LOG_PREFIX, type(exc).__name__)
+            return "回复结果无法确认。不要声称已送到，也不要自动重试；请先确认对方是否收到。"
+
     def _mode_hint(self) -> str:
         settings = self.settings
         mode = settings.tool_response_mode
@@ -443,6 +461,13 @@ class HarassmentReporterPlugin(star.Star):
             # 注意：feedback_proactive_ask 只决定「要不要主动察觉不满」，
             # 关掉它之后模型仍然要知道这个工具的存在，否则用户明确请它传话时会答不上来。
             blocks.append(self._feedback_hint())
+        if settings.feedback_enabled and session_id(event) == settings.feedback_session_id:
+            try:
+                reply_hint = await self.feedback.reply_hint(event)
+                if reply_hint:
+                    blocks.append(reply_hint)
+            except Exception as exc:
+                logger.warning("%s 主人回话提示暂不可用：%s", LOG_PREFIX, type(exc).__name__)
         try:
             courier_hint = await self.courier.hint(event)
             if courier_hint:
@@ -825,7 +850,7 @@ class HarassmentReporterPlugin(star.Star):
         if len(parts) == 2 and parts[0].isdigit():
             index = max(1, int(parts[0]))
             raw = parts[1]
-        ok, message = await self.feedback.reply_back(content=raw, index=index)
+        ok, message = await self.feedback.reply_back(content=raw, index=index, event=event)
         yield event.plain_result(message if message else ("已回话。" if ok else "回话失败。"))
 
     @filter.permission_type(filter.PermissionType.ADMIN)

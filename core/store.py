@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import json
 import time
+import uuid
 from typing import Any, Protocol
 
 from .text import clean_text, truncate
@@ -49,6 +53,7 @@ class Store:
 
     def __init__(self, host: KVHost) -> None:
         self._host = host
+        self._contacts_lock = asyncio.Lock()
 
     async def _get_dict(self, key: str) -> dict[str, Any]:
         try:
@@ -147,7 +152,9 @@ class Store:
     # ------------------------------------------------------------------
     # 冷却（持久化，重启不丢）
     # ------------------------------------------------------------------
-    async def cooldown_remaining(self, channel: str, session_id: str, cooldown: int) -> int:
+    async def cooldown_remaining(
+        self, channel: str, session_id: str, cooldown: int
+    ) -> int:
         if cooldown <= 0:
             return 0
         data = await self._get_dict(COOLDOWN_STORAGE_KEY)
@@ -163,7 +170,9 @@ class Store:
         now = time.time()
         data[f"{channel}|{session_id}"] = now
         if len(data) > 400:
-            kept = sorted(data.items(), key=lambda item: _as_ts(item[1]), reverse=True)[:200]
+            kept = sorted(data.items(), key=lambda item: _as_ts(item[1]), reverse=True)[
+                :200
+            ]
             data = dict(kept)
         await self._put(COOLDOWN_STORAGE_KEY, data)
 
@@ -218,9 +227,67 @@ class Store:
         await self._put(CONTACT_STORAGE_KEY, contacts)
 
     async def add_contact(self, payload: dict[str, Any], max_entries: int) -> None:
-        contacts = await self.get_contacts()
-        contacts.insert(0, payload)
-        await self.put_contacts(contacts[: max(1, max_entries)])
+        async with self._contacts_lock:
+            contacts = await self.get_contacts()
+            entry = dict(payload)
+            entry["contact_id"] = (
+                clean_text(entry.get("contact_id")) or uuid.uuid4().hex
+            )
+            contacts.insert(0, entry)
+            await self.put_contacts(contacts[: max(1, max_entries)])
+
+    @staticmethod
+    def contact_id(entry: dict[str, Any]) -> str:
+        """稳定的内部路由标识。旧记录按不变字段计算，不让列表序号决定工具收件人。"""
+        saved = clean_text(entry.get("contact_id"))
+        if saved:
+            return saved
+        fields = [
+            clean_text(entry.get(key))
+            for key in (
+                "created_at",
+                "session_id",
+                "platform_id",
+                "sender_id",
+                "message",
+            )
+        ]
+        return hashlib.sha256(
+            json.dumps(fields, ensure_ascii=False).encode()
+        ).hexdigest()[:32]
+
+    async def begin_contact_reply(self, contact_id: str, attempt_key: str) -> bool:
+        """发送前持久化尝试。同一条主人消息不能因重复工具调用再投递一次。"""
+        async with self._contacts_lock:
+            contacts = await self.get_contacts()
+            matches = [
+                entry for entry in contacts if self.contact_id(entry) == contact_id
+            ]
+            if len(matches) != 1:
+                return False
+            entry = matches[0]
+            attempts = entry.get("reply_attempts", [])
+            if not isinstance(attempts, list):
+                raise ValueError("回话发送记录无法读取")
+            if attempt_key in attempts:
+                return False
+            entry["reply_attempts"] = (attempts + [attempt_key])[-8:]
+            # 不能吞掉写入错误：没有防重记录就不开始发送。
+            await self._host.put_kv_data(CONTACT_STORAGE_KEY, contacts)
+            return True
+
+    async def mark_contact_replied_by_id(self, contact_id: str, reply: str) -> bool:
+        async with self._contacts_lock:
+            contacts = await self.get_contacts()
+            matches = [
+                entry for entry in contacts if self.contact_id(entry) == contact_id
+            ]
+            if len(matches) != 1:
+                return False
+            matches[0]["reply"] = truncate(clean_text(reply), 500)
+            matches[0]["replied_at"] = time.time()
+            await self._host.put_kv_data(CONTACT_STORAGE_KEY, contacts)
+            return True
 
     async def mark_contact_replied(self, index: int, reply: str) -> bool:
         contacts = await self.get_contacts()
@@ -232,7 +299,8 @@ class Store:
         return True
 
     async def clear_contacts(self) -> None:
-        await self.put_contacts([])
+        async with self._contacts_lock:
+            await self.put_contacts([])
 
     async def get_courier_state(self) -> dict[str, Any]:
         # 拒收和限流关系读取失败时必须阻止发送，不能把存储故障当成空名单。

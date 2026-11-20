@@ -143,6 +143,7 @@ class PersonRelayTool(FunctionTool[AstrAgentContext]):
     name: str = "relay_message_to_person"
     description: str = (
         "用户明确请你给某个人传话时使用。用你自己的人格在 message 里写给收件人的话，"
+        "像正常聊天，不用每次点名，不要追加署名、QQ 号或‘托我带的话’尾注。"
         "说清是谁托你带什么话；不要冒充发送者。target 必须是用户提供的名字或 QQ 号，"
         "不能猜。回给最近通过你联系当前用户的人时设 reply_to_recent=true。"
         "只转用户要求传达的内容；不读取私聊历史，也不自动回应收到的传话。"
@@ -171,4 +172,38 @@ class PersonRelayTool(FunctionTool[AstrAgentContext]):
             message=clean_text(kwargs.get("message")),
             include_images=kwargs.get("include_images") is True,
             reply_to_recent=kwargs.get("reply_to_recent") is True,
+        )
+
+
+@dataclass
+class FeedbackReplyTool(FunctionTool[AstrAgentContext]):
+    """由当前人格把主人的回复带回实际找过他的群友。"""
+
+    name: str = "reply_to_feedback_sender"
+    description: str = (
+        "主人在反馈接收窗口明确让你回给之前找过他的人时使用。"
+        "contact_id 必须从当前工具提示的联系记录中选择；多人、同名或不同会话不明确时先问清。"
+        "message 是你用当前人格说给那个人的完整回复，准确表达主人的意思。"
+        "自然帮忙传话，不用每次点名，不要添加公告、署名、QQ 号或落款。"
+        "工具回到联系记录的原群聊或原私聊，不允许模型另编收件人或会话。"
+        "仅管理员在已绑定的反馈接收窗口可用。没有主人要求就不主动回话，以实际结果为准。"
+    )
+    parameters: dict = Field(default_factory=lambda: {
+        "type": "object",
+        "properties": {
+            "contact_id": {"type": "string", "description": "工具提示中明确对应这次联系的内部标识，只用于路由，不展示给用户。"},
+            "message": {"type": "string", "description": "你用当前人格对原发送者说的完整回复，忠实转达主人的意思，不加固定开场或署名。"},
+        },
+        "required": ["contact_id", "message"],
+    })
+    plugin: Any = Field(default=None)
+
+    async def call(self, context: ContextWrapper[AstrAgentContext], **kwargs: Any) -> ToolExecResult:
+        event = _event_of(context)
+        if self.plugin is None or event is None:
+            return "拿不到插件或当前消息事件，这次没有发送回复。"
+        return await self.plugin.handle_tool_feedback_reply(
+            event=event,
+            contact_id=clean_text(kwargs.get("contact_id")),
+            message=clean_text(kwargs.get("message")),
         )

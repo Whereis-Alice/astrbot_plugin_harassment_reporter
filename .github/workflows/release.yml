@@ -18,14 +18,14 @@ jobs:
       - name: Extract version from metadata.yaml
         id: get_version
         run: |
-          VERSION=$(grep -E '^version:' metadata.yaml | sed 's/version: *//' | sed 's/ *#.*//' | tr -d ' ')
+          VERSION=$(grep -E '^version:' metadata.yaml | sed 's/version: *//' | sed 's/ *#.*//' | tr -d ' \r')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Extracted version: $VERSION"
 
       - name: Check if release exists
         id: check_release
         run: |
-          if gh release view ${{ steps.get_version.outputs.version }} &>/dev/null; then
+          if gh release view "v${{ steps.get_version.outputs.version }}" &>/dev/null; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Release ${{ steps.get_version.outputs.version }} already exists"
           else
@@ -46,7 +46,7 @@ jobs:
           import re
           import sys
 
-          version = sys.argv[1]
+          version = sys.argv[1].strip().removeprefix('v')
 
           try:
               with open('CHANGELOG.md', 'r', encoding='utf-8') as f:
