@@ -43,7 +43,9 @@ def authored_text(event: Any) -> str:
             elif kind == "Reply":
                 parts.append("[引用]")
             elif kind == "At":
-                parts.append(f"[@{clean_text(getattr(comp, 'qq', ''))}]")
+                qq = clean_text(getattr(comp, "qq", ""))
+                if qq != "qq_official":
+                    parts.append(f"[@{qq}]")
             elif kind in ("Record", "Video", "File", "Face"):
                 parts.append(
                     {

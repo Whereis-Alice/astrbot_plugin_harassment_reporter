@@ -53,6 +53,7 @@ IMAGE_PER_LINE = 4
 SOURCE_GROUP = "group_history"
 SOURCE_PRIVATE = "private_history"
 SOURCE_CONTEXT = "conversation"
+SOURCE_OFFICIAL = "official_received"
 SOURCE_CURRENT = "current_only"
 SOURCE_EMPTY = "empty"
 
@@ -87,7 +88,7 @@ class ChatLog:
     @property
     def real(self) -> bool:
         """是不是真的从平台接口拉到的聊天记录。"""
-        return self.source in {SOURCE_GROUP, SOURCE_PRIVATE}
+        return self.source in {SOURCE_GROUP, SOURCE_PRIVATE, SOURCE_OFFICIAL}
 
     def rows(self) -> list[dict[str, Any]]:
         return [line.as_dict() for line in self.lines]
@@ -121,10 +122,11 @@ class ChatLog:
 class ChatLogCollector:
     """按「平台接口优先」的顺序收集最近聊天记录。"""
 
-    def __init__(self, *, settings: Any, bridge: Any, history: Any) -> None:
+    def __init__(self, *, settings: Any, bridge: Any, history: Any, official: Any = None) -> None:
         self.settings = settings
         self.bridge = bridge
         self.history = history
+        self.official = official
         # 群名要额外发一次请求，同一个群没必要每次上报都问一遍。
         self._group_names: dict[str, str] = {}
 
@@ -182,6 +184,12 @@ class ChatLogCollector:
     async def _fetch(
         self, event: Any, gid: str, count: int
     ) -> tuple[list[ChatLine], str]:
+        if self.official is not None:
+            from .qqofficial import is_official_event
+            if is_official_event(event):
+                lines = self.official.recent(event, count)
+                if lines:
+                    return lines, SOURCE_OFFICIAL
         if is_onebot_event(event):
             client = get_client(event)
             if client is not None:
@@ -354,4 +362,6 @@ class ChatLogCollector:
             parts.append(moment)
         if log.source == SOURCE_CONTEXT and log.group_id:
             parts.append("模型上下文 · 历史发言者未核实")
+        if log.source == SOURCE_OFFICIAL:
+            parts.append("官方 Bot 实际收到的消息")
         log.subtitle = " · ".join(parts)

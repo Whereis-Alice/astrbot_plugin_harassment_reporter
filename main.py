@@ -34,6 +34,7 @@ from .core.notice import NoticeService
 from .core.onebot import OneBotBridge, get_raw_notice, is_onebot_event
 from .core.outbox import Outbox
 from .core.persona import PersonaWriter
+from .core.qqofficial import QQOfficialBridge
 from .core.store import Store
 from .core.text import PLUGIN_DISPLAY_NAME, clean_text, truncate
 from .core.tools import (
@@ -48,7 +49,7 @@ LOG_PREFIX = "[HarassmentReporter]"
 REPO_URL = "https://github.com/Whereis-Alice/astrbot_plugin_harassment_reporter"
 
 
-def _plugin_version(fallback: str = "2.4.0") -> str:
+def _plugin_version(fallback: str = "2.5.0") -> str:
     """版本号以 metadata.yaml 为准，代码这边只兜底。
 
     AstrBot 认的是 metadata.yaml；而 @star.register、/hr_status、/hr_help 和启动日志
@@ -120,6 +121,7 @@ class HarassmentReporterPlugin(star.Star):
         self.store = Store(self)
         self.persona = PersonaWriter(context, bot_self_name=self.settings.bot_self_name)
         self.bridge = OneBotBridge(debug=self.settings.debug_log)
+        self.official = QQOfficialBridge(context, self.settings)
         self.card = CardRenderer(self, self.settings)
         self.watchlist = Watchlist(self.settings, self.store)
         self.history = HistoryReader(context)
@@ -127,9 +129,10 @@ class HarassmentReporterPlugin(star.Star):
             settings=self.settings,
             bridge=self.bridge,
             history=self.history,
+            official=self.official,
         )
-        self.outbox = Outbox(context, self.store, self.settings, self.card)
-        self.courier = CourierService(settings=self.settings, store=self.store, bridge=self.bridge)
+        self.outbox = Outbox(context, self.store, self.settings, self.card, official=self.official)
+        self.courier = CourierService(settings=self.settings, store=self.store, bridge=self.bridge, official=self.official)
 
         self.harassment = HarassmentService(
             context=context,
@@ -197,6 +200,7 @@ class HarassmentReporterPlugin(star.Star):
 
     async def terminate(self) -> None:
         self.courier.close()
+        self.official.close()
         logger.info("%s v%s 已卸载。", LOG_PREFIX, PLUGIN_VERSION)
 
     # ------------------------------------------------------------------
@@ -301,6 +305,11 @@ class HarassmentReporterPlugin(star.Star):
     # ------------------------------------------------------------------
     # 提示词注入：不靠关键词，让模型自己判断什么时候该上报、什么时候该问
     # ------------------------------------------------------------------
+    @filter.event_message_type(filter.EventMessageType.ALL, priority=100)
+    async def remember_official_message(self, event: AstrMessageEvent) -> None:
+        if self.settings.enabled:
+            self.official.observe(event)
+
     async def handle_tool_courier(
         self, *, event: AstrMessageEvent, target: str, message: str,
         include_images: bool = False, reply_to_recent: bool = False,

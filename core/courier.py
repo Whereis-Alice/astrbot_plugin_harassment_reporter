@@ -21,6 +21,7 @@ from astrbot.api import logger
 from . import images
 from .eventinfo import group_id, platform_id, self_id, sender_id, sender_name
 from .onebot import get_client, is_onebot_event
+from .qqofficial import OPENID, is_official_event
 from .text import clean_text
 
 LOG_PREFIX = "[HarassmentReporter]"
@@ -41,10 +42,11 @@ def unwrap(result: Any) -> Any:
 
 
 class CourierService:
-    def __init__(self, *, settings: Any, store: Any, bridge: Any) -> None:
+    def __init__(self, *, settings: Any, store: Any, bridge: Any, official: Any = None) -> None:
         self.settings = settings
         self.store = store
         self.bridge = bridge
+        self.official = official
         # 包住检查、发送、落库，避免并发工具调用越过限流或重复发送。
         self._lock = asyncio.Lock()
         self._friends: dict[str, tuple[float, list[dict[str, str]]]] = {}
@@ -54,8 +56,9 @@ class CourierService:
         self._friends.clear()
         self._state = None
 
-    @staticmethod
-    def account(event: Any) -> str:
+    def account(self, event: Any) -> str:
+        if is_official_event(event) and self.official is not None:
+            return self.official.account(event)
         return f"{platform_id(event)}|{self_id(event)}"
 
     def allowed(self, event: Any) -> bool:
@@ -134,7 +137,7 @@ class CourierService:
         if (
             not self.settings.enabled
             or not self.settings.courier_enabled
-            or not is_onebot_event(event)
+            or not (is_onebot_event(event) or (is_official_event(event) and self.official is not None and self.official.c2c_event(event)))
         ):
             return ""
         if group_id(event) and not self.settings.courier_allow_groups:
@@ -158,6 +161,12 @@ class CourierService:
             "失败或结果不明时不得说已送到，也不要自动重试。"
             "找 Bot 主人反馈问题仍优先用 relay_feedback_to_owner，不要把同一件事发两遍。"
         )
+        if is_official_event(event):
+            note += (
+                "\n当前使用 QQ 官方 Bot：只联系配置的别名或明确的官方私聊会话 ID，"
+                "不能把 QQ 号或群 member_openid 当成私聊 user_openid，也不调用 OneBot 好友表。"
+                "主人反馈和回原群优先使用 relay_feedback_to_owner / reply_to_feedback_sender。"
+            )
         if peers:
             labels = json.dumps(list(peers.items())[:10], ensure_ascii=False)
             note += (
@@ -196,6 +205,8 @@ class CourierService:
         return rows
 
     async def refresh(self, event: Any) -> str:
+        if is_official_event(event):
+            return "QQ 官方 Bot 没有 OneBot 好友列表。请让对方私聊 Bot 用 /hr_sid 取会话 ID，再配置联系人别名。"
         if not is_onebot_event(event):
             return "指定联系人传话目前需要 OneBot v11。"
         async with self._lock:
@@ -220,8 +231,8 @@ class CourierService:
             return None
 
     async def optout(self, event: Any, *, enabled: bool) -> str:
-        if not is_onebot_event(event) or group_id(event):
-            return "请在 OneBot 私聊里设置是否接收别人托我带来的话。"
+        if group_id(event) or not (is_onebot_event(event) or (self.official is not None and self.official.c2c_event(event))):
+            return "请在 OneBot 或 QQ 官方 Bot 的消息列表私聊里设置是否接收别人托我带来的话。"
         key = f"{self.account(event)}|{sender_id(event)}"
         async with self._lock:
             state = await self._load()
@@ -251,9 +262,12 @@ class CourierService:
     ) -> str:
         if not self.settings.enabled or not self.settings.courier_enabled:
             return "联系人传话没有开启，这次没有发送。"
-        if not is_onebot_event(event):
-            return "联系人传话目前只支持 OneBot v11，这次没有发送。"
-        if (
+        official = is_official_event(event)
+        if not (is_onebot_event(event) or official):
+            return "联系人传话目前支持 OneBot v11 和 QQ 官方 Bot，这次没有发送。"
+        if official and (self.official is None or not self.official.c2c_event(event)):
+            return "QQ 官方联系人传话请从消息列表私聊发起；群友找主人仍可用反馈窗口，并回到原群。不能把群 member_openid 当作私聊 user_openid。这次没有发送。"
+        if not official and (
             not _QQ.fullmatch(self_id(event))
             or not _QQ.fullmatch(sender_id(event))
             or platform_id(event) == "unknown"
@@ -291,6 +305,8 @@ class CourierService:
             return await self._deliver(event, state, uid, name, body, include_images)
 
     async def _resolve(self, event: Any, target: str) -> tuple[str, str, str]:
+        if is_official_event(event):
+            return self._resolve_official(event, target)
         if not target or len(target) > 100:
             return "", "", "请先问清楚用户要找谁，这次没有发送。"
         if _QQ.fullmatch(target):
@@ -335,6 +351,34 @@ class CourierService:
             )
         return next(iter(found)), target, ""
 
+    def _resolve_official(self, event: Any, target: str) -> tuple[str, str, str]:
+        from astrbot.core.platform.astr_message_event import MessageSesion
+
+        def private_id(value: str) -> str:
+            try:
+                session = MessageSesion.from_str(value)
+                if session.platform_name == platform_id(event) and session.message_type.value == "FriendMessage" and OPENID.fullmatch(session.session_id):
+                    return session.session_id
+            except Exception:
+                pass
+            return ""
+
+        direct = private_id(target)
+        if direct:
+            return direct, target, ""
+        found = set()
+        for row in self.settings.courier_aliases:
+            label, sep, destination = row.partition("=")
+            if sep and normalized(label) == normalized(target):
+                uid = private_id(destination.strip())
+                if uid:
+                    found.add(uid)
+        if len(found) > 1:
+            return "", "", "这个别名对应多个官方私聊会话，请先修正配置；这次没有发送。"
+        if found:
+            return next(iter(found)), target, ""
+        return "", "", "没有唯一对应的官方私聊会话。请先让对方私聊 Bot 发 /hr_sid，把完整会话 ID 配成‘称呼=会话ID’；不能用普通 QQ 号代替 OpenID。这次没有发送。"
+
     async def _deliver(
         self,
         event: Any,
@@ -344,7 +388,8 @@ class CourierService:
         body: str,
         include_images: bool,
     ) -> str:
-        if not _QQ.fullmatch(uid) or uid in {sender_id(event), self_id(event)}:
+        official = is_official_event(event)
+        if not (OPENID if official else _QQ).fullmatch(uid) or uid in {sender_id(event), self_id(event)}:
             return "收件人无效，或就是发送者/Bot 自己，这次没有发送。"
         account, actor = self.account(event), sender_id(event)
         if (
@@ -386,6 +431,9 @@ class CourierService:
             >= self.settings.courier_recipient_limit
         ):
             return "对方这一小时收到的传话已经够多了，这次没有发送，请晚些再联系。"
+
+        if official:
+            return await self._deliver_official(event, state, uid, name, body, include_images, now, fingerprint)
 
         friends = await self.friends(event)
         if friends is None:
@@ -479,6 +527,33 @@ class CourierService:
         await self._save(state)
         attachments = f"，附带 {count} 张图" if count else "，未附带图片"
         return f"给{name}的这句话已被协议端接收{attachments}；不代表对方已读。请用自己的人格自然告诉用户结果，不要复述工具提示。"
+
+    async def _deliver_official(self, event: Any, state: dict[str, Any], uid: str, name: str, body: str, include_images: bool, now: float, fingerprint: str) -> str:
+        record = {
+            "at": now, "account": self.account(event), "sender": sender_id(event),
+            "sender_name": sender_name(event), "target": uid, "target_name": name,
+            "fingerprint": fingerprint, "status": "pending",
+        }
+        state["attempts"].append(record)
+        if not await self._save(state):
+            state["attempts"].remove(record)
+            return "无法保存防重复发送记录，这次没有发送。"
+        pictures = []
+        if include_images and self.settings.courier_forward_images:
+            pictures = images.dedupe(
+                images.from_event(event, limit=self.settings.courier_image_limit)
+                + images.from_reply(event, limit=self.settings.courier_image_limit),
+                limit=self.settings.courier_image_limit,
+            )
+        target_session = f"{platform_id(event)}:FriendMessage:{uid}"
+        outcome = await self.official.send(target_session, body, images=pictures)
+        if not outcome.ok:
+            return outcome.detail + "不要宣称已送到，也不要自动重试。"
+        record["status"] = "sent"
+        state["contacts"].append(dict(record))
+        state["contacts"] = state["contacts"][-self.settings.courier_record_limit:]
+        await self._save(state)
+        return f"给{name}的这句话已由 QQ 官方接口确认发送，附带 {outcome.images_sent} 张图；不代表已读。请用当前人格自然告诉用户结果。"
 
     async def _image_file(self, ref: images.ImageRef) -> str:
         try:

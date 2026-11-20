@@ -210,7 +210,7 @@ class FeedbackService:
         )
         outcome = RelayOutcome(
             delivery,
-            chatlog_attached=bool(image_path),
+            chatlog_attached=delivery.card_sent,
             chatlog_inlined=inlined,
             images_forwarded=delivery.images_sent,
         )

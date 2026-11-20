@@ -28,6 +28,7 @@ class Delivery:
     remaining: int = 0
     # 实际挂上去的转发图片数。回执要照实说带了几张，不能凭「打算带几张」张口就报。
     images_sent: int = 0
+    card_sent: bool = False
 
     @property
     def ok(self) -> bool:
@@ -41,11 +42,12 @@ class Outbox:
     这样骚扰上报、反馈转达、群事件通知三条链路的行为完全一致。
     """
 
-    def __init__(self, context: Any, store: Any, settings: Any, card: Any) -> None:
+    def __init__(self, context: Any, store: Any, settings: Any, card: Any, *, official: Any = None) -> None:
         self.context = context
         self.store = store
         self.settings = settings
         self.card = card
+        self.official = official
 
     async def precheck(
         self,
@@ -142,11 +144,13 @@ class Outbox:
         # 所以顺序固定为「先说话，再放聊天记录卡片，最后才是群友要转的原图」，
         # 主人打开会话时第一眼看到的永远是那句话。
         chain = MessageChain()
+        card_sent = False
         if body:
             chain.message(body)
         if image_path:
             try:
                 chain.file_image(str(image_path))
+                card_sent = True
             except Exception as exc:
                 logger.warning("%s 卡片附图失败，本次只发文本：%s", LOG_PREFIX, exc)
         images_sent = sum(1 for ref in (images or []) if ref and ref.attach_to(chain))
@@ -157,7 +161,14 @@ class Outbox:
             chain.use_t2i(False)
 
         try:
-            delivered = await self.context.send_message(target, chain)
+            if self.official is not None and self.official.platform(target) is not None:
+                outcome = await self.official.send(target, body, card=image_path, images=images)
+                if not outcome.ok:
+                    return Delivery(STATUS_SEND_FAILED, outcome.detail)
+                delivered = True
+                card_sent, images_sent = outcome.card_sent, outcome.images_sent
+            else:
+                delivered = await self.context.send_message(target, chain)
         except Exception as exc:
             logger.error("%s 投递消息失败：%s", LOG_PREFIX, exc)
             return Delivery(STATUS_SEND_FAILED, f"发送失败：{exc}")
@@ -171,4 +182,4 @@ class Outbox:
         await self.store.mark_cooldown(channel, cooldown_key)
         if hourly_limit > 0:
             await self.store.mark_rate(channel)
-        return Delivery(STATUS_OK, "已送达。", images_sent=images_sent)
+        return Delivery(STATUS_OK, "已送达。", images_sent=images_sent, card_sent=card_sent)

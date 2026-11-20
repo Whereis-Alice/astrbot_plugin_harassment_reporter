@@ -347,27 +347,27 @@
       },
       "courier_senders": {
         "type": "list",
-        "description": "额外允许发起的 QQ 号",
+        "description": "额外允许发起的用户 ID",
         "default": [],
-        "hint": "每项一个 QQ 号。不开全员权限时，这些人和 AstrBot 管理员可以发起；删掉后立即撤销。"
+        "hint": "OneBot 每项填一个 QQ 号；QQ 官方 Bot 填当前应用的私聊 user_openid。不开全员权限时，这些人和 AstrBot 管理员可以发起；删掉后立即撤销。"
       },
       "courier_allow_groups": {
         "type": "bool",
         "description": "允许从群聊发起联系人传话",
         "default": false,
-        "hint": "关闭时只接受私聊发起和私聊回话。给主人反馈仍保持原有行为。开启后也不会转发群聊历史。"
+        "hint": "仅 OneBot 联系人通道支持从群发起。QQ 官方联系人通道使用消息列表私聊；官方群找主人仍走反馈窗口，可以回原群。开启后也不会自动转发群历史。"
       },
       "courier_aliases": {
         "type": "list",
         "description": "联系人别名",
         "default": [],
-        "hint": "每项一条：别名=QQ号，例如 卡比老师=123456789。优先于好友备注/昵称；同一个别名指向多人时拒绝发送。明确 QQ 号不会被别名重定向。"
+        "hint": "OneBot：别名=QQ号，例如 卡比老师=123456789。QQ 官方 Bot：别名=完整官方私聊会话ID，右边复制对方私聊 /hr_sid 的结果。官方 OpenID 不等于 QQ 号。一个别名对应多人时拒绝发送。"
       },
       "courier_blocked": {
         "type": "list",
-        "description": "不允许投递的 QQ 号",
+        "description": "不允许投递的用户 ID",
         "default": [],
-        "hint": "每项一个 QQ 号。即使发起者是管理员或用了别名也不会投递；对方还可自行在私聊用 /hr_courier_off 拒收。"
+        "hint": "OneBot 填 QQ 号，QQ 官方 Bot 填对应的私聊 user_openid。管理员和别名也不能绕过；对方可在私聊用 /hr_courier_off 拒收。"
       },
       "courier_cache_seconds": {
         "type": "int",

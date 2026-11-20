@@ -144,7 +144,7 @@ class PersonRelayTool(FunctionTool[AstrAgentContext]):
     description: str = (
         "用户明确请你给某个人传话时使用。用你自己的人格在 message 里写给收件人的话，"
         "像正常聊天，不用每次点名，不要追加署名、QQ 号或‘托我带的话’尾注。"
-        "说清是谁托你带什么话；不要冒充发送者。target 必须是用户提供的名字或 QQ 号，"
+        "说清是谁托你带什么话；不要冒充发送者。target 必须是用户提供的名字、QQ 号或官方 Bot 完整私聊会话 ID，"
         "不能猜。回给最近通过你联系当前用户的人时设 reply_to_recent=true。"
         "只转用户要求传达的内容；不读取私聊历史，也不自动回应收到的传话。"
         "向 Bot 主人反馈问题优先用 relay_feedback_to_owner，不能两边重复发。"
@@ -153,7 +153,7 @@ class PersonRelayTool(FunctionTool[AstrAgentContext]):
     parameters: dict = Field(default_factory=lambda: {
         "type": "object",
         "properties": {
-            "target": {"type": "string", "description": "用户给出的别名、好友备注、昵称或 QQ 号；回话且仅有一个联系人时可留空。"},
+            "target": {"type": "string", "description": "用户给出的别名、好友备注、昵称、QQ 号，或 QQ 官方 Bot 的完整私聊会话 ID；回话且仅有一个联系人时可留空。"},
             "message": {"type": "string", "description": "你亲自对收件人说的完整一句话，沿用当前人格，准确传达用户想说的事。"},
             "include_images": {"type": "boolean", "description": "仅在用户要求把当前消息或引用中的图片带过去时设 true，默认 false。"},
             "reply_to_recent": {"type": "boolean", "description": "用户让你回话给最近找过他的人时设 true；多人时必须指定 target，不得猜人。"},
